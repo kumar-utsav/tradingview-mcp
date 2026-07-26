@@ -198,6 +198,40 @@ tv stream tables --filter Profiler       # table data monitoring
 tv stream all                            # all panes at once (multi-symbol)
 ```
 
+### Zero-token strategy monitor
+
+`tv monitor strategy` evaluates break-and-retest rules locally. It does not
+call an AI model. By default it reads every visible manual rectangle as a
+two-sided flip zone, requires the active chart to be SPY's 1-minute execution
+chart, seeds its state from the latest 100 bars, and polls the forming candle
+every 500 ms.
+
+```bash
+# One compact state snapshot
+tv monitor strategy --once --config examples/strategy-monitor.config.json
+
+# Continuous JSONL events; Ctrl+C stops it
+tv monitor strategy --config examples/strategy-monitor.config.json
+```
+
+Events include `BREAK_CONFIRMED`, `RETEST_CONFIRMED`, `RETEST_UPDATED`,
+`ENTRY_TRIGGERED`, `ENTRY_BLOCKED`, `BREAK_FAILED`, and `SETUP_INVALIDATED`.
+The example configuration includes the 6:30–6:40 a.m. PT opening blackout and
+a configurable 6:58–7:03 a.m. PT window around the 7:00 candle. Add scheduled
+news windows to the same `blackouts` array before the session.
+
+The MCP server exposes the same engine through:
+
+- `strategy_monitor_snapshot`
+- `strategy_monitor_start`
+- `strategy_monitor_status`
+- `strategy_monitor_events`
+- `strategy_monitor_stop`
+
+The monitor itself makes zero model calls. Reading events through an AI client
+still uses tokens for the compact event payload, so pass the last `after_id` to
+`strategy_monitor_events` and request only new events.
+
 ## How Claude Knows Which Tool to Use
 
 Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project. It contains a complete decision tree:
@@ -224,7 +258,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | `chart_get_state` | First call — get symbol, timeframe, all indicator names + IDs | ~500B |
 | `data_get_study_values` | Read current RSI, MACD, BB, EMA values from all indicators | ~500B |
 | `quote_get` | Get latest price, OHLC, volume | ~200B |
-| `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
+| `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / ~8KB per 100 raw bars |
 
 ### Custom Indicator Data (Pine Drawings)
 

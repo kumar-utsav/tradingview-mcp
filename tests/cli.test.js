@@ -42,6 +42,7 @@ describe('CLI — help and routing', () => {
     assert.ok(stdout.includes('status'));
     assert.ok(stdout.includes('pine'));
     assert.ok(stdout.includes('quote'));
+    assert.ok(stdout.includes('monitor'));
   });
 
   it('-h is same as --help', () => {
@@ -77,6 +78,15 @@ describe('CLI — help and routing', () => {
     assert.equal(exitCode, 0);
     assert.ok(stdout.includes('--count'));
     assert.ok(stdout.includes('--summary'));
+  });
+
+  it('monitor strategy --help shows low-latency options', () => {
+    const { stdout, exitCode } = run(['monitor', 'strategy', '--help']);
+    assert.equal(exitCode, 0);
+    assert.ok(stdout.includes('--config'));
+    assert.ok(stdout.includes('--interval'));
+    assert.ok(stdout.includes('--history'));
+    assert.ok(stdout.includes('--once'));
   });
 });
 

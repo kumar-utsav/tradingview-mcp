@@ -4,7 +4,7 @@
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 
-const MAX_OHLCV_BARS = 500;
+export const MAX_OHLCV_BARS = 2500;
 const MAX_TRADES = 20;
 
 // Round to 8 dp — enough to kill float noise (29899.999999997 → 29900) without
@@ -13,6 +13,30 @@ const MAX_TRADES = 20;
 const roundPrice = (v) => (v == null ? null : Math.round(v * 1e8) / 1e8);
 const CHART_API = KNOWN_PATHS.chartApi;
 const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
+
+async function ensureOhlcvBarsLoaded(limit) {
+  for (let i = 0; i < 10; i++) {
+    const state = await evaluate(`
+      (function() {
+        var ms = ${CHART_API}._chartWidget.model().mainSeries();
+        var bars = ms.bars();
+        if (!bars || typeof bars.lastIndex !== 'function') return null;
+        var size = typeof bars.size === 'function' ? bars.size() : (bars.lastIndex() - bars.firstIndex() + 1);
+        var more = true;
+        try { more = ms.requestMoreDataAvailable(); } catch (e) {}
+        return { size: size, more: more };
+      })()
+    `);
+    if (!state || state.size >= limit || !state.more) break;
+    await evaluate(`
+      (function() {
+        try { ${CHART_API}._chartWidget.model().mainSeries().requestMoreData(1000); }
+        catch (e) {}
+      })()
+    `);
+    await new Promise(r => setTimeout(r, 1800));
+  }
+}
 
 // Serializes getQuote() calls that mutate chart symbol so concurrent callers
 // can't race over the shared chart state. JS is single-threaded but our
@@ -138,6 +162,7 @@ export async function getOhlcv({ count, summary } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
   let data;
   try {
+    await ensureOhlcvBarsLoaded(limit);
     data = await evaluate(`
       (function() {
         var bars = ${BARS_PATH};

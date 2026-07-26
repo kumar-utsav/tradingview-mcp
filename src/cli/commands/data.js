@@ -9,7 +9,7 @@ register('quote', {
 register('ohlcv', {
   description: 'Get OHLCV bar data',
   options: {
-    count: { type: 'string', short: 'n', description: 'Number of bars (default 100, max 500)' },
+    count: { type: 'string', short: 'n', description: 'Number of bars (default 100, max 2500)' },
     summary: { type: 'boolean', short: 's', description: 'Return summary stats instead of all bars' },
   },
   handler: (opts) => core.getOhlcv({
