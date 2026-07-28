@@ -281,7 +281,7 @@ else
 if isRTHFirstBar
     dayOpen := open
     rthStartBar := bar_index
-    
+
     // Update gap variables for gap box drawing
     if showDailyGaps and not na(prevClose)
         prevDayClose := prevClose
@@ -423,7 +423,7 @@ f15m_calculator(sym, res, rthStart, rth15MinEnd) =>
             calculatedF15mHigh := tempF15mHigh
             calculatedF15mLow := tempF15mLow
             f15mCalcDone := true
-            
+
     [calculatedF15mHigh, calculatedF15mLow]
 
 [f15mHigh_val, f15mLow_val] = request.security(symbol=syminfo.tickerid, timeframe="1", expression=f15m_calculator(syminfo.tickerid, "1", rthOpenTime, rth15MinEndTime), gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_on)
@@ -577,27 +577,27 @@ if showDailyGaps and not na(prevDayClose) and not na(currentDayOpen) and not na(
     // Check if there's actually a gap (allow small threshold for noise)
     gapThreshold = syminfo.mintick * 2
     hasGap = math.abs(currentDayOpen - prevDayClose) > gapThreshold
-    
+
     if hasGap
         // Delete previous gap box and label if they exist
         if not na(gapBox)
             box.delete(gapBox)
         if not na(gapLabel)
             label.delete(gapLabel)
-        
+
         // Determine gap direction and colors
         isGapUp = currentDayOpen > prevDayClose
         gapBorderColor = isGapUp ? gapUpColor : gapDownColor
-        
+
         // Calculate box coordinates
         boxLeft = rthStartBar
         boxRight = bar_index + 50  // Extend box to the right
         boxTop = math.max(currentDayOpen, prevDayClose)
         boxBottom = math.min(currentDayOpen, prevDayClose)
-        
+
         // Create gap box with colored borders and customizable background
         gapBox := box.new(left=boxLeft, top=boxTop, right=boxRight, bottom=boxBottom, bgcolor=gapBackgroundColor, border_color=gapBorderColor, border_style=line.style_dashed, border_width=2, extend=extend.right)
-        
+
         // Add label if enabled
         if showGapLabel
             // Calculate label position
@@ -605,9 +605,9 @@ if showDailyGaps and not na(prevDayClose) and not na(currentDayOpen) and not na(
                 "Left" => boxLeft + 3
                 "Right" => boxRight - 3
                 => math.round((boxLeft + boxRight) / 2)  // Center (default)
-            
+
             labelY = (boxTop + boxBottom) / 2  // Always center vertically
-            
+
             // Create gap label with direction
             gapLabelText = isGapUp ? "Daily Gap Up" : "Daily Gap Down"
             gapLabel := label.new(x=labelX, y=labelY, text=gapLabelText, style=label.style_none, textcolor=gapLabelColor, size=size.large, xloc=xloc.bar_index, textalign=text.align_center)
@@ -701,10 +701,10 @@ if show50CentLevels
             line.delete(array.get(fiftyCentLines, i))
     array.clear(fiftyCentLines)
     array.clear(fiftyCentLevels)
-    
+
     // Calculate current price level rounded to nearest 50 cents
     currentPriceLevel = math.round(close * 2) / 2  // Round to nearest 0.5
-    
+
     // Create 10 levels above and 10 levels below (21 total levels)
     for i = -10 to 10
         level = currentPriceLevel + (i * 0.5)
@@ -927,5 +927,3 @@ f15Color = getRangeColor(f15Hi, f15Lo)
 table.cell(rangeTable, 0, 0, text="PM", bgcolor=pmColor, text_color=color.black)
 table.cell(rangeTable, 1, 0, text="PD", bgcolor=pdColor, text_color=color.black)
 table.cell(rangeTable, 2, 0, text="ORB", bgcolor=f15Color, text_color=color.black)
-
-
