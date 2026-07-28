@@ -3,6 +3,7 @@
  */
 import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection, safeString } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
+import { MAX_OHLCV_BARS } from './data.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -45,7 +46,7 @@ export async function batchRun({ symbols, timeframes, action, delay_ms, ohlcv_co
           writeFileSync(filePath, Buffer.from(data, 'base64'));
           actionResult = { file_path: filePath };
         } else if (action === 'get_ohlcv' && apiPath) {
-          const limit = Math.min(ohlcv_count || 100, 500);
+          const limit = Math.min(ohlcv_count || 100, MAX_OHLCV_BARS);
           actionResult = await evaluateAsync(`
             new Promise(function(resolve, reject) {
               ${apiPath}.exportData({ includeTime: true, includeSeries: true, includeStudies: false })

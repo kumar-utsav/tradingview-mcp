@@ -1,0 +1,24 @@
+{
+  "symbol": "SPY",
+  "timezone": "America/Los_Angeles",
+  "session": {
+    "start": "06:30",
+    "end": "08:30"
+  },
+  "blackouts": [
+    {
+      "start": "06:30",
+      "end": "06:40",
+      "label": "opening_10_minutes"
+    },
+    {
+      "start": "06:58",
+      "end": "07:03",
+      "label": "seven_am_window"
+    }
+  ],
+  "zonesFromDrawings": true,
+  "requireOneMinuteChart": true,
+  "allowActiveRetestEntry": true,
+  "zones": []
+}

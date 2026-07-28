@@ -87,7 +87,7 @@ export async function streamQuote({ interval } = {}) {
 
 // ── Stream: ohlcv (last N bars, emits on new bar) ──
 
-async function fetchLastBar() {
+export async function fetchLastBar() {
   return evaluate(`
     (function() {
       var chart = ${CHART_API};

@@ -1,0 +1,867 @@
+//@version=6
+indicator("Key Levels", "Levels", overlay=true)
+
+// === === === LEVEL VISIBILITY === === ===
+showPMHigh     = input.bool(true, title="Show Pre-Market High", group="🔍 Level Visibility")
+showPMLow      = input.bool(true, title="Show Pre-Market Low", group="🔍 Level Visibility")
+showPDHigh     = input.bool(true, title="Show Previous Day High", group="🔍 Level Visibility")
+showPDLow      = input.bool(true, title="Show Previous Day Low", group="🔍 Level Visibility")
+showPWHigh     = input.bool(true, title="Show Previous Week High", group="🔍 Level Visibility")
+showPWLow      = input.bool(true, title="Show Previous Week Low", group="🔍 Level Visibility")
+showPDClose    = input.bool(true, title="Show Previous Day Close", group="🔍 Level Visibility")
+showOpen       = input.bool(true, title="Show Today's Open Price", group="🔍 Level Visibility")
+showCHigh      = input.bool(true, title="Show Current Day High", group="🔍 Level Visibility")
+showCLow       = input.bool(true, title="Show Current Day Low", group="🔍 Level Visibility")
+showF15MHigh   = input.bool(true, title="Show First 15 Min High", group="🔍 Level Visibility")
+showF15MLow    = input.bool(true, title="Show First 15 Min Low", group="🔍 Level Visibility")
+showF5MHigh    = input.bool(true, title="Show First 5 Min High", group="🔍 Level Visibility")
+showF5MLow     = input.bool(true, title="Show First 5 Min Low", group="🔍 Level Visibility")
+showPsych      = input.bool(true, title="Show Closest Psych", group="🔍 Level Visibility")
+showDynamite   = input.bool(true, title="Show Closest Dynamite Above/Below", group="🔍 Level Visibility")
+showATH        = input.bool(true, title="Show All-Time High", group="🔍 Level Visibility")
+show50CentLevels = input.bool(false, title="Show 50 Cent Levels", group="🔍 Level Visibility", tooltip="Show levels at every 50 cents (10 above and 10 below current price)")
+showTimeLines = input.bool(false, "Show 7 AM / 8 AM PST Lines")
+show15MBackground = input.bool(false, title="Show 15 Min Range Background", group="🔍 Level Visibility", tooltip="Show background color between 15 min high and low")
+showDailyGaps = input.bool(true, title="Show Daily Gaps", group="🔍 Level Visibility", tooltip="Show gap between previous day close and current day open")
+showGapLabel = input.bool(true, title="Show Gap Label", group="🔍 Level Visibility", tooltip="Show 'Daily Gap' label on gap boxes")
+gapLabelPosition = input.string("Center", title="Gap Label Position", options=["Left", "Center", "Right"], group="🔍 Level Visibility", tooltip="Position of the gap label within the box")
+
+// === === === COLOR SETTINGS === === ===
+pmHighColor     = input.color(color.green,  title="PM High", group="🎨 Color Settings")
+pmLowColor      = input.color(color.red,    title="PM Low", group="🎨 Color Settings")
+pdHighColor     = input.color(color.green,  title="PD High", group="🎨 Color Settings")
+pdLowColor      = input.color(color.red,    title="PD Low", group="🎨 Color Settings")
+pwHighColor     = input.color(color.green,  title="PW High", group="🎨 Color Settings")
+pwLowColor      = input.color(color.red,    title="PW Low", group="🎨 Color Settings")
+pdCloseColor    = input.color(color.blue,   title="PD Close", group="🎨 Color Settings")
+openColor       = input.color(color.aqua,   title="Open", group="🎨 Color Settings")
+cHighColor      = input.color(color.black,  title="Current High", group="🎨 Color Settings")
+cLowColor       = input.color(color.black,    title="Current Low", group="🎨 Color Settings")
+f15mHighColor   = input.color(color.green,  title="15 Min High", group="🎨 Color Settings")
+f15mLowColor    = input.color(color.red,    title="15 Min Low", group="🎨 Color Settings")
+f15mBackgroundColor = input.color(color.new(color.gray, 95), title="15 Min Range Background", group="🎨 Color Settings")
+f5mHighColor    = input.color(color.green,  title="5 Min High", group="🎨 Color Settings")
+f5mLowColor     = input.color(color.red,    title="5 Min Low", group="🎨 Color Settings")
+psychColor      = input.color(color.orange, title="Psych", group="🎨 Color Settings")
+dynamiteColor   = input.color(color.orange, title="Dynamite", group="🎨 Color Settings")
+fiftycentColor  = input.color(color.gray, title="50 Cent Levels", group="🎨 Color Settings")
+athColor        = input.color(color.fuchsia, title="ATH", group="🎨 Color Settings")
+timeLineColor = input.color(color.red, "Line Color")
+gapUpColor = input.color(color.green, title="Gap Up Border Color", group="🎨 Color Settings", tooltip="Border color for upward gaps")
+gapDownColor = input.color(color.red, title="Gap Down Border Color", group="🎨 Color Settings", tooltip="Border color for downward gaps")
+gapBackgroundColor = input.color(color.new(color.white, 100), title="Gap Background Color", group="🎨 Color Settings", tooltip="Background color for gap boxes (transparent by default)")
+gapLabelColor = input.color(color.black, title="Gap Label Color", group="🎨 Color Settings", tooltip="Text color for gap labels")
+
+// === === === LINE SETTINGS === === ===
+// PM Levels
+pmHighWidth = input.int(2, title="PM High Width", minval=1, maxval=10, group="📏 PM Levels Line Settings")
+pmHighStyle = input.string("Solid", title="PM High Style", options=["Solid", "Dashed", "Dotted"], group="📏 PM Levels Line Settings")
+pmLowWidth = input.int(2, title="PM Low Width", minval=1, maxval=10, group="📏 PM Levels Line Settings")
+pmLowStyle = input.string("Solid", title="PM Low Style", options=["Solid", "Dashed", "Dotted"], group="📏 PM Levels Line Settings")
+
+// PD Levels
+pdHighWidth = input.int(2, title="PD High Width", minval=1, maxval=10, group="📏 PD Levels Line Settings")
+pdHighStyle = input.string("Solid", title="PD High Style", options=["Solid", "Dashed", "Dotted"], group="📏 PD Levels Line Settings")
+pdLowWidth = input.int(2, title="PD Low Width", minval=1, maxval=10, group="📏 PD Levels Line Settings")
+pdLowStyle = input.string("Solid", title="PD Low Style", options=["Solid", "Dashed", "Dotted"], group="📏 PD Levels Line Settings")
+pdCloseWidth = input.int(2, title="PD Close Width", minval=1, maxval=10, group="📏 PD Levels Line Settings")
+pdCloseStyle = input.string("Solid", title="PD Close Style", options=["Solid", "Dashed", "Dotted"], group="📏 PD Levels Line Settings")
+
+// Previous Week Levels
+pwHighWidth = input.int(2, title="PW High Width", minval=1, maxval=10, group="📏 PW Levels Line Settings")
+pwHighStyle = input.string("Solid", title="PW High Style", options=["Solid", "Dashed", "Dotted"], group="📏 PW Levels Line Settings")
+pwLowWidth = input.int(2, title="PW Low Width", minval=1, maxval=10, group="📏 PW Levels Line Settings")
+pwLowStyle = input.string("Solid", title="PW Low Style", options=["Solid", "Dashed", "Dotted"], group="📏 PW Levels Line Settings")
+
+// Open & Current Day Levels
+openWidth = input.int(2, title="Open Width", minval=1, maxval=10, group="📏 Open & Current Day Line Settings")
+openStyle = input.string("Solid", title="Open Style", options=["Solid", "Dashed", "Dotted"], group="📏 Open & Current Day Line Settings")
+cHighWidth = input.int(2, title="Current High Width", minval=1, maxval=10, group="📏 Open & Current Day Line Settings")
+cHighStyle = input.string("Dashed", title="Current High Style", options=["Solid", "Dashed", "Dotted"], group="📏 Open & Current Day Line Settings")
+cLowWidth = input.int(2, title="Current Low Width", minval=1, maxval=10, group="📏 Open & Current Day Line Settings")
+cLowStyle = input.string("Dashed", title="Current Low Style", options=["Solid", "Dashed", "Dotted"], group="📏 Open & Current Day Line Settings")
+
+// First 15/5 Min Levels
+f15mHighWidth = input.int(2, title="15 Min High Width", minval=1, maxval=10, group="📏 First 15/5 Min Line Settings")
+f15mHighStyle = input.string("Solid", title="15 Min High Style", options=["Solid", "Dashed", "Dotted"], group="📏 First 15/5 Min Line Settings")
+f15mLowWidth = input.int(2, title="15 Min Low Width", minval=1, maxval=10, group="📏 First 15/5 Min Line Settings")
+f15mLowStyle = input.string("Solid", title="15 Min Low Style", options=["Solid", "Dashed", "Dotted"], group="📏 First 15/5 Min Line Settings")
+f5mHighWidth = input.int(2, title="5 Min High Width", minval=1, maxval=10, group="📏 First 15/5 Min Line Settings")
+f5mHighStyle = input.string("Solid", title="5 Min High Style", options=["Solid", "Dashed", "Dotted"], group="📏 First 15/5 Min Line Settings")
+f5mLowWidth = input.int(2, title="5 Min Low Width", minval=1, maxval=10, group="📏 First 15/5 Min Line Settings")
+f5mLowStyle = input.string("Solid", title="5 Min Low Style", options=["Solid", "Dashed", "Dotted"], group="📏 First 15/5 Min Line Settings")
+
+// Special Levels
+athWidth = input.int(2, title="ATH Width", minval=1, maxval=10, group="📏 Special Levels Line Settings")
+athStyle = input.string("Solid", title="ATH Style", options=["Solid", "Dashed", "Dotted"], group="📏 Special Levels Line Settings")
+psychWidth = input.int(2, title="Psych Width", minval=1, maxval=10, group="📏 Special Levels Line Settings")
+psychStyle = input.string("Solid", title="Psych Style", options=["Solid", "Dashed", "Dotted"], group="📏 Special Levels Line Settings")
+dynamiteWidth = input.int(2, title="Dynamite Width", minval=1, maxval=10, group="📏 Special Levels Line Settings")
+dynamiteStyle = input.string("Solid", title="Dynamite Style", options=["Solid", "Dashed", "Dotted"], group="📏 Special Levels Line Settings")
+
+// Enforced semantic colors: highs are red, lows are green
+highLevelColor = color.rgb(242, 54, 69)
+lowLevelColor = color.rgb(76, 175, 80)
+
+// Convert line style string to Pine Script line style
+getLineStyle(style) =>
+    switch style
+        "Solid" => line.style_solid
+        "Dashed" => line.style_dashed
+        "Dotted" => line.style_dotted
+        => line.style_solid
+
+step = 50.0
+pmStartHour = 4
+pmEndHour = 9
+pmEndMinute = 30
+
+today = time("D", "America/New_York")
+pmStart = timestamp("America/New_York", year(today), month(today), dayofmonth(today), pmStartHour, 0)
+pmEnd = timestamp("America/New_York", year(today), month(today), dayofmonth(today), pmEndHour, pmEndMinute)
+inPremarket = (time >= pmStart) and (time < pmEnd)
+afterPremarket = (time >= pmEnd)
+newDay = year(time, "America/New_York") != year(time[1], "America/New_York") or month(time, "America/New_York") != month(time[1], "America/New_York") or dayofmonth(time, "America/New_York") != dayofmonth(time[1], "America/New_York")
+newWeek = ta.change(time("W", "America/New_York")) != 0
+
+// Timing variables for level display control
+rthOpenTime = timestamp("America/New_York", year(time), month(time), dayofmonth(time), 9, 30)
+rth5MinPassedTime = timestamp("America/New_York", year(time), month(time), dayofmonth(time), 9, 35)
+rth15MinPassedTime = timestamp("America/New_York", year(time), month(time), dayofmonth(time), 9, 45)
+
+// Display conditions for different level types
+show5MinLevels = time >= rth5MinPassedTime  // 5min levels show after 5min has passed from RTH open
+show15MinLevels = time >= rth15MinPassedTime  // 15min levels show after 15min has passed from RTH open
+showPDHPMHLevels = time >= pmStart  // PDH and PMH levels show as soon as premarket opens
+showOtherLevels = afterPremarket  // All other levels show after premarket ends (current behavior)
+
+var float pmHigh = na
+var float pmLow = na
+var float pdHigh = na
+var float pdLow = na
+var float pdHigh2 = na
+var float pdHigh3 = na
+var float pdHigh4 = na
+var float pdLow2 = na
+var float pdLow3 = na
+var float pdLow4 = na
+var float pwHigh = na
+var float pwLow = na
+var float pdClose = na
+var float dayOpen = na
+var float cHigh = na
+var float cLow = na
+var float f15mHigh = na
+var float f15mLow = na
+var float f5mHigh = na
+var float f5mLow = na
+
+var int pmHighBarIndex = na
+var int pmLowBarIndex = na
+var int pdHighBarIndex = na
+var int pdLowBarIndex = na
+var int pdHighTime = na
+var int pdLowTime = na
+var int pdHighTime2 = na
+var int pdHighTime3 = na
+var int pdHighTime4 = na
+var int pdLowTime2 = na
+var int pdLowTime3 = na
+var int pdLowTime4 = na
+var int pwHighTime = na
+var int pwLowTime = na
+var int pdCloseBarIndex = na
+var int cHighBarIndex = na
+var int cLowBarIndex = na
+var int rthStartBar = na
+
+// Variables for gap tracking
+var float prevDayClose = na
+var float currentDayOpen = na
+var box gapBox = na
+var label gapLabel = na
+
+var line pmHighLine = na
+var line pmLowLine = na
+var line pdHighLine = na
+var line pdLowLine = na
+var line[] priorDayHighLines = array.new<line>()
+var line[] priorDayLowLines = array.new<line>()
+var line pwHighLine = na
+var line pwLowLine = na
+var line pdCloseLine = na
+var line openLine = na
+var line chLine = na
+var line clLine = na
+var line f15mHighLine = na
+var line f15mLowLine = na
+var line f5mHighLine = na
+var line f5mLowLine = na
+var line psychLine = na
+var line athLine = na
+var line[] fiftyCentLines = array.new<line>()
+
+[prevHigh, prevLow, prevCloseValue, prevDayTime] = request.security(symbol=syminfo.tickerid, timeframe="D", expression=[high[1], low[1], close[1], time[1]], lookahead=barmerge.lookahead_on)
+
+getPreviousWeekLevels() =>
+    previousWeekStart = time("W")[1]
+    float weekHigh = na
+    float weekLow = na
+    int weekHighTime = na
+    int weekLowTime = na
+    for i = 1 to 10
+        if time("W")[i] == previousWeekStart
+            if na(weekHigh) or high[i] > weekHigh
+                weekHigh := high[i]
+                weekHighTime := time[i]
+            if na(weekLow) or low[i] < weekLow
+                weekLow := low[i]
+                weekLowTime := time[i]
+    [weekHigh, weekLow, weekHighTime, weekLowTime]
+
+[prevWeekHigh, prevWeekLow, prevWeekHighTime, prevWeekLowTime] = request.security(symbol=syminfo.tickerid, timeframe="D", expression=getPreviousWeekLevels())
+
+// Starting with the immediately preceding day, retain only successively higher
+// highs and successively lower lows.  This skips days between qualifying levels.
+getPriorDayHighs() =>
+    float level1 = high
+    float level2 = na
+    float level3 = na
+    float level4 = na
+    int levelTime2 = na
+    int levelTime3 = na
+    int levelTime4 = na
+    for i = 1 to 1000
+        candidate = high[i]
+        if na(level2) and candidate > level1
+            level2 := candidate
+            levelTime2 := time[i]
+        else if na(level3) and candidate > level2
+            level3 := candidate
+            levelTime3 := time[i]
+        else if na(level4) and candidate > level3
+            level4 := candidate
+            levelTime4 := time[i]
+    [level2, level3, level4, levelTime2, levelTime3, levelTime4]
+
+getPriorDayLows() =>
+    float level1 = low
+    float level2 = na
+    float level3 = na
+    float level4 = na
+    int levelTime2 = na
+    int levelTime3 = na
+    int levelTime4 = na
+    for i = 1 to 1000
+        candidate = low[i]
+        if na(level2) and candidate < level1
+            level2 := candidate
+            levelTime2 := time[i]
+        else if na(level3) and candidate < level2
+            level3 := candidate
+            levelTime3 := time[i]
+        else if na(level4) and candidate < level3
+            level4 := candidate
+            levelTime4 := time[i]
+    [level2, level3, level4, levelTime2, levelTime3, levelTime4]
+
+[prevHigh2, prevHigh3, prevHigh4, prevHighTime2, prevHighTime3, prevHighTime4] = request.security(symbol=syminfo.tickerid, timeframe="D", expression=getPriorDayHighs())
+[prevLow2, prevLow3, prevLow4, prevLowTime2, prevLowTime3, prevLowTime4] = request.security(symbol=syminfo.tickerid, timeframe="D", expression=getPriorDayLows())
+
+// Get previous day's close for gap calculation
+prevClose = request.security(symbol=syminfo.tickerid, timeframe="D", expression=close[1], lookahead=barmerge.lookahead_on)
+
+rth15MinEndTime = timestamp("America/New_York", year(time), month(time), dayofmonth(time), 9, 45)
+rth5MinEndTime = timestamp("America/New_York", year(time), month(time), dayofmonth(time), 9, 35)
+isRTHFirstBar = time == rthOpenTime
+
+// Check if premarket just started (for resetting 5min and 15min levels)
+var bool pmJustStarted = false
+if ta.change(time >= pmStart) and time >= pmStart
+    pmJustStarted := true
+else
+    pmJustStarted := false
+
+if isRTHFirstBar
+    dayOpen := open
+    rthStartBar := bar_index
+
+    // Update gap variables for gap box drawing
+    if showDailyGaps and not na(prevClose)
+        prevDayClose := prevClose
+        currentDayOpen := open
+
+if newDay
+    pmHigh := na
+    pmLow := na
+    cHigh := na
+    cLow := na
+    pmHighBarIndex := na
+    pmLowBarIndex := na
+    cHighBarIndex := na
+    cLowBarIndex := na
+    pdHigh := prevHigh
+    pdLow := prevLow
+    pdHigh2 := prevHigh2
+    pdHigh3 := prevHigh3
+    pdHigh4 := prevHigh4
+    pdLow2 := prevLow2
+    pdLow3 := prevLow3
+    pdLow4 := prevLow4
+    pdClose := prevCloseValue
+    pdHighBarIndex := bar_index
+    pdLowBarIndex := bar_index
+    pdHighTime := prevDayTime
+    pdLowTime := prevDayTime
+    pdHighTime2 := prevHighTime2
+    pdHighTime3 := prevHighTime3
+    pdHighTime4 := prevHighTime4
+    pdLowTime2 := prevLowTime2
+    pdLowTime3 := prevLowTime3
+    pdLowTime4 := prevLowTime4
+    pdCloseBarIndex := bar_index
+    if not na(pmHighLine)
+        line.delete(pmHighLine)
+    if not na(pmLowLine)
+        line.delete(pmLowLine)
+    if not na(pdHighLine)
+        line.delete(pdHighLine)
+    if not na(pdLowLine)
+        line.delete(pdLowLine)
+    if array.size(priorDayHighLines) > 0
+        for i = 0 to array.size(priorDayHighLines) - 1
+            line.delete(array.get(priorDayHighLines, i))
+    array.clear(priorDayHighLines)
+    if array.size(priorDayLowLines) > 0
+        for i = 0 to array.size(priorDayLowLines) - 1
+            line.delete(array.get(priorDayLowLines, i))
+    array.clear(priorDayLowLines)
+    if not na(pdCloseLine)
+        line.delete(pdCloseLine)
+    if not na(openLine)
+        line.delete(openLine)
+    if not na(chLine)
+        line.delete(chLine)
+    if not na(clLine)
+        line.delete(clLine)
+
+// Keep the most-recent completed daily levels synchronized on every bar.
+pdHigh := prevHigh
+pdLow := prevLow
+pdClose := prevCloseValue
+pdHighTime := prevDayTime
+pdLowTime := prevDayTime
+
+if newWeek
+    pwHigh := prevWeekHigh
+    pwLow := prevWeekLow
+    pwHighTime := prevWeekHighTime
+    pwLowTime := prevWeekLowTime
+
+// Reset gap box on new day
+if newDay and not na(gapBox)
+    box.delete(gapBox)
+    gapBox := na
+if newDay and not na(gapLabel)
+    label.delete(gapLabel)
+    gapLabel := na
+
+// Reset 5min and 15min levels when premarket starts (not at newDay)
+if pmJustStarted or newDay
+    f15mHigh := na
+    f15mLow := na
+    f5mHigh := na
+    f5mLow := na
+    if not na(f15mHighLine)
+        line.delete(f15mHighLine)
+    if not na(f15mLowLine)
+        line.delete(f15mLowLine)
+    if not na(f5mHighLine)
+        line.delete(f5mHighLine)
+    if not na(f5mLowLine)
+        line.delete(f5mLowLine)
+
+if newDay
+    for i = 1 to 1000
+        if na(pdHighBarIndex) and high[i] == pdHigh
+            pdHighBarIndex := bar_index - i
+        if na(pdLowBarIndex) and low[i] == pdLow
+            pdLowBarIndex := bar_index - i
+        if na(pdCloseBarIndex) and close[i] == pdClose
+            pdCloseBarIndex := bar_index - i
+
+if inPremarket
+    if na(pmHigh) or high > pmHigh
+        pmHigh := high
+        pmHighBarIndex := bar_index
+    if na(pmLow) or low < pmLow
+        pmLow := low
+        pmLowBarIndex := bar_index
+
+if not inPremarket
+    if na(cHigh) or high > cHigh
+        cHigh := high
+        cHighBarIndex := bar_index
+    if na(cLow) or low < cLow
+        cLow := low
+        cLowBarIndex := bar_index
+
+f15m_calculator(sym, res, rthStart, rth15MinEnd) =>
+    var float calculatedF15mHigh = na
+    var float calculatedF15mLow = na
+    var bool f15mCalcDone = false
+    if ta.change(time("D")) != 0
+        calculatedF15mHigh := na
+        calculatedF15mLow := na
+        f15mCalcDone := false
+
+    if not f15mCalcDone and time >= rthStart and time < rth15MinEnd
+        if na(calculatedF15mHigh) or high > calculatedF15mHigh
+            calculatedF15mHigh := high
+
+        if na(calculatedF15mLow) or low < calculatedF15mLow
+            calculatedF15mLow := low
+    else if not f15mCalcDone and time >= rth15MinEnd
+        [tempF15mHigh, tempF15mLow] = request.security(symbol=sym, timeframe="15", expression=[high[0], low[0]], lookahead=barmerge.lookahead_on)
+        if time("15", "America/New_York") == rthOpenTime and not na(tempF15mHigh)
+            calculatedF15mHigh := tempF15mHigh
+            calculatedF15mLow := tempF15mLow
+            f15mCalcDone := true
+
+    [calculatedF15mHigh, calculatedF15mLow]
+
+[f15mHigh_val, f15mLow_val] = request.security(symbol=syminfo.tickerid, timeframe="1", expression=f15m_calculator(syminfo.tickerid, "1", rthOpenTime, rth15MinEndTime), gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_on)
+// Only show 15min values after 15 minutes have passed from RTH open
+f15mHigh := show15MinLevels ? f15mHigh_val : na
+f15mLow := show15MinLevels ? f15mLow_val : na
+
+f5m_calculator(sym, rthStart, rthEnd) =>
+    var float h = na
+    var float l = na
+    var bool done = false
+    if ta.change(time("D")) != 0
+        h := na
+        l := na
+        done := false
+    if not done and time >= rthStart and time < rthEnd
+        if na(h) or high > h
+            h := high
+        if na(l) or low < l
+            l := low
+    else if not done and time >= rthEnd
+        [th, tl] = request.security(symbol=sym, timeframe="5", expression=[high[0], low[0]], lookahead=barmerge.lookahead_on)
+        if time("5", "America/New_York") == rthOpenTime and not na(th)
+            h := th
+            l := tl
+            done := true
+    [h, l]
+
+[f5mHigh_val, f5mLow_val] = request.security(symbol=syminfo.tickerid, timeframe="1", expression=f5m_calculator(syminfo.tickerid, rthOpenTime, rth5MinEndTime), gaps=barmerge.gaps_on, lookahead=barmerge.lookahead_on)
+// Only show 5min values after 5 minutes have passed from RTH open
+f5mHigh := show5MinLevels ? f5mHigh_val : na
+f5mLow := show5MinLevels ? f5mLow_val : na
+
+// === All-Time High Calculation and Line ===
+GetChartHighest(dataSeries = high) =>
+    var chartHighest = dataSeries
+    if dataSeries > nz(chartHighest, -1e10)
+        chartHighest := dataSeries
+    chartHighest
+
+allTimeHigh = request.security(symbol=syminfo.tickerid, timeframe="M", expression=GetChartHighest(), lookahead=barmerge.lookahead_on)
+
+// === Draw Lines ===
+if showPDHPMHLevels and showPMHigh and not na(pmHigh) and not na(pmHighBarIndex)
+    if not na(pmHighLine)
+        line.delete(pmHighLine)
+    pmHighLine := line.new(x1=pmHighBarIndex, y1=pmHigh, x2=bar_index + 1, y2=pmHigh, color=highLevelColor, style=getLineStyle(pmHighStyle), width=pmHighWidth, extend=extend.right)
+
+if showPDHPMHLevels and showPMLow and not na(pmLow) and not na(pmLowBarIndex)
+    if not na(pmLowLine)
+        line.delete(pmLowLine)
+    pmLowLine := line.new(x1=pmLowBarIndex, y1=pmLow, x2=bar_index + 1, y2=pmLow, color=lowLevelColor, style=getLineStyle(pmLowStyle), width=pmLowWidth, extend=extend.right)
+
+if showPDHPMHLevels and showPDHigh and not na(pdHigh) and not na(pdHighBarIndex)
+    if not na(pdHighLine)
+        line.delete(pdHighLine)
+    pdHighLine := timeframe.isdaily ? line.new(x1=bar_index - 1, y1=pdHigh, x2=bar_index, y2=pdHigh, xloc=xloc.bar_index, color=highLevelColor, style=getLineStyle(pdHighStyle), width=pdHighWidth, extend=extend.right) : line.new(x1=pdHighTime, y1=pdHigh, x2=pdHighTime + 86400000, y2=pdHigh, xloc=xloc.bar_time, color=highLevelColor, style=getLineStyle(pdHighStyle), width=pdHighWidth, extend=extend.right)
+
+if showPDHPMHLevels and showPDLow and not na(pdLow) and not na(pdLowBarIndex)
+    if not na(pdLowLine)
+        line.delete(pdLowLine)
+    pdLowLine := timeframe.isdaily ? line.new(x1=bar_index - 1, y1=pdLow, x2=bar_index, y2=pdLow, xloc=xloc.bar_index, color=lowLevelColor, style=getLineStyle(pdLowStyle), width=pdLowWidth, extend=extend.right) : line.new(x1=pdLowTime, y1=pdLow, x2=pdLowTime + 86400000, y2=pdLow, xloc=xloc.bar_time, color=lowLevelColor, style=getLineStyle(pdLowStyle), width=pdLowWidth, extend=extend.right)
+
+if showPDHPMHLevels and showPWHigh and not na(pwHigh) and not na(pwHighTime)
+    if not na(pwHighLine)
+        line.delete(pwHighLine)
+    pwHighLine := line.new(x1=pwHighTime, y1=pwHigh, x2=pwHighTime + 86400000, y2=pwHigh, xloc=xloc.bar_time, color=highLevelColor, style=getLineStyle(pwHighStyle), width=pwHighWidth, extend=extend.right)
+
+if showPDHPMHLevels and showPWLow and not na(pwLow) and not na(pwLowTime)
+    if not na(pwLowLine)
+        line.delete(pwLowLine)
+    pwLowLine := line.new(x1=pwLowTime, y1=pwLow, x2=pwLowTime + 86400000, y2=pwLow, xloc=xloc.bar_time, color=lowLevelColor, style=getLineStyle(pwLowStyle), width=pwLowWidth, extend=extend.right)
+
+if showPDHPMHLevels and showPDHigh and not na(pdHighBarIndex)
+    if array.size(priorDayHighLines) > 0
+        for i = 0 to array.size(priorDayHighLines) - 1
+            line.delete(array.get(priorDayHighLines, i))
+    array.clear(priorDayHighLines)
+    priorHighLevels = array.from(pdHigh2, pdHigh3, pdHigh4)
+    priorHighTimes = array.from(pdHighTime2, pdHighTime3, pdHighTime4)
+    for i = 0 to array.size(priorHighLevels) - 1
+        level = array.get(priorHighLevels, i)
+        levelTime = array.get(priorHighTimes, i)
+        if not na(level) and not na(levelTime)
+            priorDayHighLine = line.new(x1=levelTime, y1=level, x2=levelTime + 86400000, y2=level, xloc=xloc.bar_time, color=highLevelColor, style=getLineStyle(pdHighStyle), width=pdHighWidth, extend=extend.right)
+            array.push(priorDayHighLines, priorDayHighLine)
+
+if showPDHPMHLevels and showPDLow and not na(pdLowBarIndex)
+    if array.size(priorDayLowLines) > 0
+        for i = 0 to array.size(priorDayLowLines) - 1
+            line.delete(array.get(priorDayLowLines, i))
+    array.clear(priorDayLowLines)
+    priorLowLevels = array.from(pdLow2, pdLow3, pdLow4)
+    priorLowTimes = array.from(pdLowTime2, pdLowTime3, pdLowTime4)
+    for i = 0 to array.size(priorLowLevels) - 1
+        level = array.get(priorLowLevels, i)
+        levelTime = array.get(priorLowTimes, i)
+        if not na(level) and not na(levelTime)
+            priorDayLowLine = line.new(x1=levelTime, y1=level, x2=levelTime + 86400000, y2=level, xloc=xloc.bar_time, color=lowLevelColor, style=getLineStyle(pdLowStyle), width=pdLowWidth, extend=extend.right)
+            array.push(priorDayLowLines, priorDayLowLine)
+
+if showPDHPMHLevels and showPDClose and not na(pdClose) and not na(pdCloseBarIndex)
+    if not na(pdCloseLine)
+        line.delete(pdCloseLine)
+    pdCloseLine := line.new(x1=pdCloseBarIndex, y1=pdClose, x2=bar_index + 1, y2=pdClose, color=pdCloseColor, style=getLineStyle(pdCloseStyle), width=pdCloseWidth, extend=extend.right)
+
+if showOtherLevels and showOpen and not na(dayOpen)
+    if not na(openLine)
+        line.delete(openLine)
+    openLine := line.new(x1=rthStartBar, y1=dayOpen, x2=bar_index + 1, y2=dayOpen, color=openColor, style=getLineStyle(openStyle), width=openWidth, extend=extend.right)
+
+if showOtherLevels and showCHigh and not na(cHigh) and not na(cHighBarIndex)
+    if not na(chLine)
+        line.delete(chLine)
+    chLine := line.new(x1=cHighBarIndex, y1=cHigh, x2=bar_index + 1, y2=cHigh, color=highLevelColor, style=getLineStyle(cHighStyle), width=cHighWidth, extend=extend.right)
+
+if showOtherLevels and showCLow and not na(cLow) and not na(cLowBarIndex)
+    if not na(clLine)
+        line.delete(clLine)
+    clLine := line.new(x1=cLowBarIndex, y1=cLow, x2=bar_index + 1, y2=cLow, color=lowLevelColor, style=getLineStyle(cLowStyle), width=cLowWidth, extend=extend.right)
+
+if show15MinLevels and showF15MHigh and not na(f15mHigh)
+    if not na(f15mHighLine)
+        line.delete(f15mHighLine)
+    f15mHighLine := line.new(x1=rthStartBar, y1=f15mHigh, x2=bar_index + 1, y2=f15mHigh, color=highLevelColor, style=getLineStyle(f15mHighStyle), width=f15mHighWidth, extend=extend.right)
+
+if show15MinLevels and showF15MLow and not na(f15mLow)
+    if not na(f15mLowLine)
+        line.delete(f15mLowLine)
+    f15mLowLine := line.new(x1=rthStartBar, y1=f15mLow, x2=bar_index + 1, y2=f15mLow, color=lowLevelColor, style=getLineStyle(f15mLowStyle), width=f15mLowWidth, extend=extend.right)
+
+if show5MinLevels and showF5MHigh and not na(f5mHigh)
+    if not na(f5mHighLine)
+        line.delete(f5mHighLine)
+    f5mHighLine := line.new(x1=rthStartBar, y1=f5mHigh, x2=bar_index + 1, y2=f5mHigh, color=highLevelColor, style=getLineStyle(f5mHighStyle), width=f5mHighWidth, extend=extend.right)
+
+if show5MinLevels and showF5MLow and not na(f5mLow)
+    if not na(f5mLowLine)
+        line.delete(f5mLowLine)
+    f5mLowLine := line.new(x1=rthStartBar, y1=f5mLow, x2=bar_index + 1, y2=f5mLow, color=lowLevelColor, style=getLineStyle(f5mLowStyle), width=f5mLowWidth, extend=extend.right)
+
+if showOtherLevels and showATH and not na(allTimeHigh)
+    if not na(athLine)
+        line.delete(athLine)
+    athLine := line.new(x1=bar_index, y1=allTimeHigh, x2=bar_index + 1, y2=allTimeHigh, color=athColor, style=getLineStyle(athStyle), width=athWidth, extend=extend.both)
+
+// === Draw Daily Gap Box ===
+if showDailyGaps and not na(prevDayClose) and not na(currentDayOpen) and not na(rthStartBar)
+    // Check if there's actually a gap (allow small threshold for noise)
+    gapThreshold = syminfo.mintick * 2
+    hasGap = math.abs(currentDayOpen - prevDayClose) > gapThreshold
+
+    if hasGap
+        // Delete previous gap box and label if they exist
+        if not na(gapBox)
+            box.delete(gapBox)
+        if not na(gapLabel)
+            label.delete(gapLabel)
+
+        // Determine gap direction and colors
+        isGapUp = currentDayOpen > prevDayClose
+        gapBorderColor = isGapUp ? gapUpColor : gapDownColor
+
+        // Calculate box coordinates
+        boxLeft = rthStartBar
+        boxRight = bar_index + 50  // Extend box to the right
+        boxTop = math.max(currentDayOpen, prevDayClose)
+        boxBottom = math.min(currentDayOpen, prevDayClose)
+
+        // Create gap box with colored borders and customizable background
+        gapBox := box.new(left=boxLeft, top=boxTop, right=boxRight, bottom=boxBottom, bgcolor=gapBackgroundColor, border_color=gapBorderColor, border_style=line.style_dashed, border_width=2, extend=extend.right)
+
+        // Add label if enabled
+        if showGapLabel
+            // Calculate label position
+            labelX = switch gapLabelPosition
+                "Left" => boxLeft + 3
+                "Right" => boxRight - 3
+                => math.round((boxLeft + boxRight) / 2)  // Center (default)
+
+            labelY = (boxTop + boxBottom) / 2  // Always center vertically
+
+            // Create gap label with direction
+            gapLabelText = isGapUp ? "Daily Gap Up" : "Daily Gap Down"
+            gapLabel := label.new(x=labelX, y=labelY, text=gapLabelText, style=label.style_none, textcolor=gapLabelColor, size=size.large, xloc=xloc.bar_index, textalign=text.align_center)
+
+plot(showPDHPMHLevels and showPMHigh ? pmHigh : na, title=" PMH", color=color.new(pmHighColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showPDHPMHLevels and showPMLow  ? pmLow  : na, title=" PML", color=color.new(pmLowColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showPDHPMHLevels and showPDHigh ? pdHigh : na, title=" PDH", color=color.new(pdHighColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showPDHPMHLevels and showPDLow  ? pdLow  : na, title=" PDL", color=color.new(pdLowColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showPDHPMHLevels and showPDClose ? pdClose : na, title=" PDC", color=color.new(pdCloseColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showOtherLevels and showOpen   ? dayOpen : na, title=" Open", color=color.new(openColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showOtherLevels and showCHigh  ? cHigh   : na, title=" High", color=color.new(cHighColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showOtherLevels and showCLow   ? cLow    : na, title=" Low", color=color.new(cLowColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(show15MinLevels and showF15MHigh ? f15mHigh : na, title=" 15MH", color=color.new(f15mHighColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(show15MinLevels and showF15MLow  ? f15mLow  : na, title=" 15ML", color=color.new(f15mLowColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+
+// Create invisible plots for fill area between 15M high and low
+f15mHighPlot = plot(show15MinLevels and showF15MHigh and showF15MLow and show15MBackground and not na(f15mHigh) and not na(f15mLow) ? f15mHigh : na, color=color.new(color.white, 100), linewidth=1, display=display.none)
+f15mLowPlot = plot(show15MinLevels and showF15MHigh and showF15MLow and show15MBackground and not na(f15mHigh) and not na(f15mLow) ? f15mLow : na, color=color.new(color.white, 100), linewidth=1, display=display.none)
+
+// Fill the area between 15M high and low with configurable background color
+fill(f15mHighPlot, f15mLowPlot, color=show15MBackground ? f15mBackgroundColor : na, title="15M Range Background")
+plot(show5MinLevels and showF5MHigh ? f5mHigh : na, title=" 5MH", color=color.new(f5mHighColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(show5MinLevels and showF5MLow  ? f5mLow  : na, title=" 5ML", color=color.new(f5mLowColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showOtherLevels and showATH ? allTimeHigh : na, title=" ATH", color=color.new(athColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+
+// === Psych + $50 Levels ===
+var float[] psychLevels = array.new_float()
+if bar_index == 0
+    for d = 1 to 9
+        rep = d * 111.11
+        array.push(psychLevels, rep)
+
+var float closest = na
+minDiff = 1e9
+for i = 0 to array.size(psychLevels) - 1
+    level = array.get(psychLevels, i)
+    diff = math.abs(close - level)
+    if diff < minDiff
+        minDiff := diff
+        closest := level
+
+if showPsych
+    if not na(psychLine)
+        line.delete(psychLine)
+    psychLine := line.new(x1=bar_index, y1=closest, x2=bar_index + 1, y2=closest, color=psychColor, style=getLineStyle(psychStyle), width=psychWidth, extend=extend.both)
+plot(showPsych ? closest : na, title=" Psych", color=color.new(psychColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+
+// === Dynamite Levels (Closest Above/Below) ===
+var line dynamiteAboveLine = na
+var line dynamiteBelowLine = na
+var float dynamiteAboveLevel = na
+var float dynamiteBelowLevel = na
+
+if showDynamite
+    dynamiteAboveLevel := (math.floor(close / step) + 1) * step
+    dynamiteBelowLevel := (math.ceil(close / step) - 1) * step
+    dynamiteAboveLevel := dynamiteAboveLevel > 0 ? dynamiteAboveLevel : na
+    dynamiteBelowLevel := dynamiteBelowLevel > 0 ? dynamiteBelowLevel : na
+
+    if not na(dynamiteAboveLine)
+        line.delete(dynamiteAboveLine)
+        dynamiteAboveLine := na
+    if not na(dynamiteBelowLine)
+        line.delete(dynamiteBelowLine)
+        dynamiteBelowLine := na
+
+    if not na(dynamiteAboveLevel)
+        dynamiteAboveLine := line.new(x1=bar_index, y1=dynamiteAboveLevel, x2=bar_index + 1, y2=dynamiteAboveLevel, color=dynamiteColor, style=getLineStyle(dynamiteStyle), width=dynamiteWidth, extend=extend.both)
+    if not na(dynamiteBelowLevel)
+        dynamiteBelowLine := line.new(x1=bar_index, y1=dynamiteBelowLevel, x2=bar_index + 1, y2=dynamiteBelowLevel, color=dynamiteColor, style=getLineStyle(dynamiteStyle), width=dynamiteWidth, extend=extend.both)
+else
+    dynamiteAboveLevel := na
+    dynamiteBelowLevel := na
+    if not na(dynamiteAboveLine)
+        line.delete(dynamiteAboveLine)
+        dynamiteAboveLine := na
+    if not na(dynamiteBelowLine)
+        line.delete(dynamiteBelowLine)
+        dynamiteBelowLine := na
+
+plot(showDynamite and not na(dynamiteAboveLevel) ? dynamiteAboveLevel : na, title=" Dynamite Above", color=color.new(dynamiteColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+plot(showDynamite and not na(dynamiteBelowLevel) ? dynamiteBelowLevel : na, title=" Dynamite Below", color=color.new(dynamiteColor, 100), style=plot.style_line, linewidth=1, display=display.none)
+
+// === 50 Cent Levels ===
+var float[] fiftyCentLevels = array.new_float()
+
+if show50CentLevels
+    // Clear previous 50 cent lines
+    if array.size(fiftyCentLines) > 0
+        for i = 0 to array.size(fiftyCentLines) - 1
+            line.delete(array.get(fiftyCentLines, i))
+    array.clear(fiftyCentLines)
+    array.clear(fiftyCentLevels)
+
+    // Calculate current price level rounded to nearest 50 cents
+    currentPriceLevel = math.round(close * 2) / 2  // Round to nearest 0.5
+
+    // Create 10 levels above and 10 levels below (21 total levels)
+    for i = -10 to 10
+        level = currentPriceLevel + (i * 0.5)
+        if level > 0  // Only show positive levels
+            array.push(fiftyCentLevels, level)
+            fiftyCentLine = line.new(x1=bar_index, y1=level, x2=bar_index + 1, y2=level, color=fiftycentColor, width=1, extend=extend.both, style=line.style_dashed)
+            array.push(fiftyCentLines, fiftyCentLine)
+
+
+
+// === === === VERTICAL TIME LINES @ 7AM / 8AM PST === === ===
+
+timeInSession(hourTarget) =>
+    hourVal = hour(time, "America/Los_Angeles")
+    minuteVal = minute(time, "America/Los_Angeles")
+    hourVal == hourTarget and minuteVal == 0
+
+is7am = timeInSession(7)
+is8am = timeInSession(8)
+
+if showTimeLines
+    if is7am
+        line.new(x1=bar_index, y1=low, x2=bar_index, y2=high, extend=extend.both, color=timeLineColor, width=1, style=line.style_dashed)
+    if is8am
+        line.new(x1=bar_index, y1=low, x2=bar_index, y2=high, extend=extend.both, color=timeLineColor, width=1, style=line.style_dashed)
+
+// === === === CROSS DETECTION VARIABLES === === ===
+crossPMHigh      = ta.cross(high, pmHigh)
+crossPMLow       = ta.cross(low, pmLow)
+crossPDHigh      = ta.cross(high, pdHigh)
+crossPDLow       = ta.cross(low, pdLow)
+crossPDClose     = ta.cross(close, pdClose)
+crossOpen        = ta.cross(close, dayOpen)
+crossCHigh       = ta.cross(high, cHigh)
+crossCLow        = ta.cross(low, cLow)
+crossF15MHigh    = ta.cross(high, f15mHigh)
+crossF15MLow     = ta.cross(low, f15mLow)
+crossF5MHigh     = ta.cross(high, f5mHigh)
+crossF5MLow      = ta.cross(low, f5mLow)
+crossATH         = ta.cross(high, allTimeHigh)
+crossPsych       = ta.cross(close, closest)
+
+// Check if price crosses any dynamite level
+var bool crossAnyDynamite = false
+if showDynamite
+    crossAnyDynamite := not na(close[1]) and math.floor(close / step) != math.floor(close[1] / step)
+else
+    crossAnyDynamite := false
+
+// Check if price crosses any 50 cent level
+var bool crossAny50CentLevel = false
+if show50CentLevels and array.size(fiftyCentLevels) > 0
+    crossAny50CentLevel := false
+    for i = 0 to array.size(fiftyCentLevels) - 1
+        level = array.get(fiftyCentLevels, i)
+        if ta.cross(close, level)
+            crossAny50CentLevel := true
+            break
+
+// === === === ALERT CONDITIONS === === ===
+
+// Individual alert conditions (can be used if you want specific alerts)
+alertcondition(showPMHigh and showPDHPMHLevels and not na(pmHigh) and crossPMHigh, "Price crossed PM High", "Price crossed Pre-Market High Level")
+alertcondition(showPMLow and showPDHPMHLevels and not na(pmLow) and crossPMLow, "Price crossed PM Low", "Price crossed Pre-Market Low Level")
+alertcondition(showPDHigh and showPDHPMHLevels and not na(pdHigh) and crossPDHigh, "Price crossed PD High", "Price crossed Previous Day High Level")
+alertcondition(showPDLow and showPDHPMHLevels and not na(pdLow) and crossPDLow, "Price crossed PD Low", "Price crossed Previous Day Low Level")
+alertcondition(showPDClose and showPDHPMHLevels and not na(pdClose) and crossPDClose, "Price crossed PD Close", "Price crossed Previous Day Close Level")
+alertcondition(showOpen and showOtherLevels and not na(dayOpen) and crossOpen, "Price crossed Open", "Price crossed Today's Open Level")
+alertcondition(showCHigh and showOtherLevels and not na(cHigh) and crossCHigh, "Price crossed Day High", "Price crossed Current Day High Level")
+alertcondition(showCLow and showOtherLevels and not na(cLow) and crossCLow, "Price crossed Day Low", "Price crossed Current Day Low Level")
+alertcondition(showF15MHigh and show15MinLevels and not na(f15mHigh) and crossF15MHigh, "Price crossed First 15M High", "Price crossed First 15 Minutes High Level")
+alertcondition(showF15MLow and show15MinLevels and not na(f15mLow) and crossF15MLow, "Price crossed First 15M Low", "Price crossed First 15 Minutes Low Level")
+alertcondition(showF5MHigh and show5MinLevels and not na(f5mHigh) and crossF5MHigh, "Price crossed First 5M High", "Price crossed First 5 Minutes High Level")
+alertcondition(showF5MLow and show5MinLevels and not na(f5mLow) and crossF5MLow, "Price crossed First 5M Low", "Price crossed First 5 Minutes Low Level")
+alertcondition(showATH and showOtherLevels and not na(allTimeHigh) and crossATH, "Price crossed ATH", "Price crossed All-Time High Level")
+alertcondition(showPsych and not na(closest) and crossPsych, "Price crossed Psych Level", "Price crossed Psychological Level")
+alertcondition(showDynamite and crossAnyDynamite, "Price crossed Dynamite Level", "Price crossed a Dynamite Level")
+alertcondition(show50CentLevels and crossAny50CentLevel, "Price crossed 50 Cent Level", "Price crossed a 50 Cent Level")
+
+// === COMBINED SINGLE ALERT FOR ALL LEVELS ===
+// Check if any level is crossed
+anyLevelCrossed = (showPMHigh and showPDHPMHLevels and not na(pmHigh) and crossPMHigh) or
+                  (showPMLow and showPDHPMHLevels and not na(pmLow) and crossPMLow) or
+                  (showPDHigh and showPDHPMHLevels and not na(pdHigh) and crossPDHigh) or
+                  (showPDLow and showPDHPMHLevels and not na(pdLow) and crossPDLow) or
+                  (showPDClose and showPDHPMHLevels and not na(pdClose) and crossPDClose) or
+                  (showOpen and showOtherLevels and not na(dayOpen) and crossOpen) or
+                  (showCHigh and showOtherLevels and not na(cHigh) and crossCHigh) or
+                  (showCLow and showOtherLevels and not na(cLow) and crossCLow) or
+                  (showF15MHigh and show15MinLevels and not na(f15mHigh) and crossF15MHigh) or
+                  (showF15MLow and show15MinLevels and not na(f15mLow) and crossF15MLow) or
+                  (showF5MHigh and show5MinLevels and not na(f5mHigh) and crossF5MHigh) or
+                  (showF5MLow and show5MinLevels and not na(f5mLow) and crossF5MLow) or
+                  (showATH and showOtherLevels and not na(allTimeHigh) and crossATH) or
+                  (showPsych and not na(closest) and crossPsych) or
+                  (showDynamite and crossAnyDynamite) or
+                  (show50CentLevels and crossAny50CentLevel)
+
+// Single combined alert for all levels using plot placeholders
+alertcondition(anyLevelCrossed, "🎯 Any Key Level Crossed", "Key Level Crossed on {{ticker}} at {{close}}. Check PMH={{plot(\" PMH\")}}, PML={{plot(\" PML\")}}, PDH={{plot(\" PDH\")}}, PDL={{plot(\" PDL\")}}, Open={{plot(\" Open\")}}, High={{plot(\" High\")}}, Low={{plot(\" Low\")}}, 15MH={{plot(\" 15MH\")}}, 15ML={{plot(\" 15ML\")}}, 5MH={{plot(\" 5MH\")}}, 5ML={{plot(\" 5ML\")}}, ATH={{plot(\" ATH\")}}, Psych={{plot(\" Psych\")}}, DynamiteAbove={{plot(\" Dynamite Above\")}}, DynamiteBelow={{plot(\" Dynamite Below\")}}")
+
+// === Compact right-edge level tags ===
+var label[] rightLevelLabels = array.new<label>()
+
+addRightLevelTag(_show, _price, _name, _color) =>
+    if _show and not na(_price)
+        tagTextColor = color.r(_color) + color.g(_color) + color.b(_color) > 500 ? color.black : color.white
+        array.push(rightLevelLabels, label.new(x=bar_index + 10, y=_price, text=_name + " " + str.tostring(_price, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=_color, textcolor=tagTextColor, size=size.small))
+
+if barstate.islast
+    if array.size(rightLevelLabels) > 0
+        for i = 0 to array.size(rightLevelLabels) - 1
+            label.delete(array.get(rightLevelLabels, i))
+    array.clear(rightLevelLabels)
+    addRightLevelTag(showPDHPMHLevels and showPMHigh, pmHigh, "PMH", highLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPMLow, pmLow, "PML", lowLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDHigh, pdHigh, "PDH", highLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDHigh, pdHigh2, "PDH2", highLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDHigh, pdHigh3, "PDH3", highLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDHigh, pdHigh4, "PDH4", highLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDLow, pdLow, "PDL", lowLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDLow, pdLow2, "PDL2", lowLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDLow, pdLow3, "PDL3", lowLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDLow, pdLow4, "PDL4", lowLevelColor)
+    addRightLevelTag(showOtherLevels and showPWHigh, pwHigh, "PWH", highLevelColor)
+    addRightLevelTag(showOtherLevels and showPWLow, pwLow, "PWL", lowLevelColor)
+    addRightLevelTag(showPDHPMHLevels and showPDClose, pdClose, "PDC", pdCloseColor)
+    addRightLevelTag(showOtherLevels and showOpen, dayOpen, "OPEN", openColor)
+    addRightLevelTag(showOtherLevels and showCHigh, cHigh, "HIGH", highLevelColor)
+    addRightLevelTag(showOtherLevels and showCLow, cLow, "LOW", lowLevelColor)
+    addRightLevelTag(show15MinLevels and showF15MHigh, f15mHigh, "15MH", highLevelColor)
+    addRightLevelTag(show15MinLevels and showF15MLow, f15mLow, "15ML", lowLevelColor)
+    addRightLevelTag(show5MinLevels and showF5MHigh, f5mHigh, "5MH", highLevelColor)
+    addRightLevelTag(show5MinLevels and showF5MLow, f5mLow, "5ML", lowLevelColor)
+    addRightLevelTag(showOtherLevels and showATH, allTimeHigh, "ATH", athColor)
+    addRightLevelTag(showPsych, closest, "PSYCH", psychColor)
+    addRightLevelTag(showDynamite, dynamiteAboveLevel, "DYN", dynamiteColor)
+    addRightLevelTag(showDynamite, dynamiteBelowLevel, "DYN", dynamiteColor)
+
+// === === === RANGE STATUS TABLE === === ===
+getRangeColor(_hi, _lo) => close > _hi ? color.green : close < _lo ? color.red : color.yellow
+
+var table rangeTable = table.new(position.top_right, 3, 1, border_width=1)
+
+pmHi = na(pmHigh) ? close + 1 : pmHigh
+pmLo = na(pmLow) ? close - 1 : pmLow
+pdHi = na(pdHigh) ? close + 1 : pdHigh
+pdLo = na(pdLow) ? close - 1 : pdLow
+f15Hi = na(f15mHigh) ? close + 1 : f15mHigh
+f15Lo = na(f15mLow) ? close - 1 : f15mLow
+
+pmColor = getRangeColor(pmHi, pmLo)
+pdColor = getRangeColor(pdHi, pdLo)
+f15Color = getRangeColor(f15Hi, f15Lo)
+
+table.cell(rangeTable, 0, 0, text="PM", bgcolor=pmColor, text_color=color.black)
+table.cell(rangeTable, 1, 0, text="PD", bgcolor=pdColor, text_color=color.black)
+table.cell(rangeTable, 2, 0, text="ORB", bgcolor=f15Color, text_color=color.black)

@@ -14,6 +14,7 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerStrategyMonitorTools } from './tools/strategy-monitor.js';
 
 const server = new McpServer(
   {
@@ -56,6 +57,7 @@ Replay: replay_start → replay_step → replay_trade → replay_status → repl
 Batch: batch_run → run action across multiple symbols/timeframes
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
+Strategy monitor: strategy_monitor_start → strategy_monitor_events → strategy_monitor_stop
 Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
@@ -65,7 +67,8 @@ CONTEXT MANAGEMENT:
 - ALWAYS use study_filter on pine tools when you know which indicator you want
 - NEVER use verbose=true unless user specifically asks for raw data
 - Prefer capture_screenshot for visual context over pulling large datasets
-- Call chart_get_state ONCE at start, reuse entity IDs`,
+- Call chart_get_state ONCE at start, reuse entity IDs
+- For live strategy monitoring, read only new events with strategy_monitor_events(after_id=...)`,
   }
 );
 
@@ -84,6 +87,7 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerStrategyMonitorTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
