@@ -7,6 +7,12 @@ let targetInfo = null;
 // resolves to ::1 first, and Electron's --remote-debugging-port only listens on IPv4.
 export const CDP_HOST = process.env.TV_CDP_HOST || process.env.CDP_HOST || '127.0.0.1';
 export const CDP_PORT = Number(process.env.TV_CDP_PORT || process.env.CDP_PORT) || 9222;
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+if (!LOOPBACK_HOSTS.has(CDP_HOST.toLowerCase())) {
+  throw new Error(
+    'TV_CDP_HOST must be a loopback address; remote CDP access is disabled.',
+  );
+}
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 

@@ -9,7 +9,7 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 > **Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall or access control. It reads from and controls the TradingView Desktop app already running on your machine.
 
 > [!NOTE]
-> **All data processing occurs locally on your machine.** No TradingView data is transmitted, stored, or redistributed externally by this tool.
+> **TradingView and CDP access stay local to your machine.** The capture/sync tools transmit chart captures only when invoked and only to the authenticated backend URL you configure.
 
 > [!CAUTION]
 > This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
@@ -122,13 +122,52 @@ Add to your Claude Code MCP config (`~/.claude/.mcp.json` or project `.mcp.json`
   "mcpServers": {
     "tradingview": {
       "command": "node",
-      "args": ["/path/to/tradingview-mcp/src/server.js"]
+      "args": ["/path/to/tradingview-mcp/src/server.js"],
+      "env": {
+        "TV_CDP_HOST": "127.0.0.1",
+        "TV_CDP_PORT": "9222",
+        "TRADING_BACKEND_URL": "http://127.0.0.1:5555",
+        "TRADINGVIEW_INGESTION_TOKEN": "replace-with-the-backend-token"
+      }
     }
   }
 }
 ```
 
 Replace `/path/to/tradingview-mcp` with your actual path.
+
+Keep the ingestion token in your local MCP configuration or process environment. Do not commit it. The CDP host should remain loopback-only.
+
+For a local environment file, copy `.env.example` to the ignored `.env`, fill
+in the backend URL and token, and launch the server with Node's environment-file
+support:
+
+```json
+{
+  "command": "node",
+  "args": [
+    "--env-file=/absolute/path/to/tradingview-mcp/.env",
+    "/absolute/path/to/tradingview-mcp/src/server.js"
+  ]
+}
+```
+
+The authenticated trading capture tools are:
+
+- `capture_journal_call_trade`
+- `capture_journal_put_trade`
+- `capture_journal_call_miss`
+- `capture_journal_put_miss`
+- `capture_backtest_batch`
+
+Journal tools wait for an interactive bar selection in TradingView. All five tools capture the chart locally and send the result directly to the configured backend; the web frontend is notified after the database transaction commits.
+
+For `capture_backtest_batch`, draw each long/short position and put a TradingView
+text or note drawing beside it with the trade reasoning. A note is assigned to
+the closest position within 40 bars and stored in that trade's Notes section.
+Multiple nearby notes are joined in chart order. The backend reuses existing
+tags/checklist items and applies its configured finite limits before it creates
+any new reusable reasoning tag.
 
 ### 4. Verify
 
@@ -249,7 +288,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (94 MCP tools)
 
 ### Chart Reading
 
@@ -385,7 +424,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (94 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

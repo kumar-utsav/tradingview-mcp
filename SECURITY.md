@@ -27,5 +27,8 @@ This project connects to a locally running TradingView Desktop instance via Chro
 
 - Only run TradingView with `--remote-debugging-port=9222` on localhost
 - Do not expose port 9222 to your network or the internet
+- The MCP process rejects non-loopback `TV_CDP_HOST` values
+- Keep `TRADINGVIEW_INGESTION_TOKEN` in local environment or MCP configuration only
+- Use a backend token dedicated to the `/ingestion` routes, not a general account credential
 - Do not pipe `tv stream` output to external services without reviewing the data
 - Keep your TradingView Desktop and Node.js installations up to date
