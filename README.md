@@ -167,7 +167,11 @@ text or note drawing beside it with the trade reasoning. A note is assigned to
 the closest position within 40 bars and stored in that trade's Notes section.
 Multiple nearby notes are joined in chart order. The backend reuses existing
 tags/checklist items and applies its configured finite limits before it creates
-any new reusable reasoning tag.
+any new reusable reasoning tag. The capture also determines whether each entry
+is inside or outside the previous-day and pre-market ranges, records session
+levels touched by the entry candle, and detects overlapping manual rectangles,
+manual levels, and supported named Pine levels. These use a fixed confluence
+checklist vocabulary; arbitrary drawing names do not become new tags.
 
 ### 4. Verify
 

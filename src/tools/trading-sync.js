@@ -55,7 +55,7 @@ export function registerTradingSyncTools(server) {
   );
   server.tool(
     "capture_backtest_batch",
-    "Capture every long/short position drawing and its nearby text note, calculate outcomes, analyze reusable tags, and sync one backtest batch",
+    "Capture every long/short position drawing, nearby reasoning note, entry range/level/rectangle context, outcomes, and reusable checklist tags, then sync one backtest batch",
     input,
     async ({ idempotency_key }) => {
       try {

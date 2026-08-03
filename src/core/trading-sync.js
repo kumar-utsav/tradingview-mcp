@@ -4,9 +4,71 @@ import {
   evaluateAsync as defaultEvaluateAsync,
   getClient,
 } from "../connection.js";
+import { getPineLabels } from "./data.js";
 
 const CHART_API = "window.TradingViewApi._activeChartWidgetWV.value()";
 const MAX_TRADES_BATCH = 1000;
+
+const LEVEL_TAG_PATTERNS = [
+  [/^PWH\b/i, "bt_confluence_prior_week_high"],
+  [/^PWL\b/i, "bt_confluence_prior_week_low"],
+  [/^PDH\d*\b/i, "bt_confluence_prior_day_high"],
+  [/^PDL\d*\b/i, "bt_confluence_prior_day_low"],
+  [/^PDC\b/i, "bt_confluence_prior_day_close"],
+  [/^PMH\b/i, "bt_confluence_premarket_high"],
+  [/^PML\b/i, "bt_confluence_premarket_low"],
+  [/^5MH\b/i, "bt_confluence_first_5m_high"],
+  [/^5ML\b/i, "bt_confluence_first_5m_low"],
+  [/^15MH\b/i, "bt_confluence_first_15m_high"],
+  [/^15ML\b/i, "bt_confluence_first_15m_low"],
+  [/^OPEN\b/i, "bt_confluence_session_open"],
+  [/^HIGH\b/i, "bt_confluence_hod"],
+  [/^LOW\b/i, "bt_confluence_lod"],
+  [/\bVWAP\b/i, "bt_confluence_vwap"],
+  [/\b(?:EMA|SMA|MOVING AVERAGE)\b/i, "bt_confluence_moving_average"],
+  [/\b(?:PSYCH|DYN|ATH|ROUND)\b/i, "bt_confluence_htf_round_dynamic"],
+];
+
+export function classifyLevelLabel(label) {
+  return LEVEL_TAG_PATTERNS.find(([pattern]) => pattern.test(label || ""))?.[1];
+}
+
+export function enrichTradesWithStudyLabels(trades, labelResult) {
+  const labels = (labelResult?.studies || [])
+    .filter((study) => !/market structures|zigzag/i.test(study.name || ""))
+    .flatMap((study) =>
+      (study.labels || []).map((label) => ({ ...label, study: study.name })),
+    );
+  return trades.map((trade) => {
+    const low = trade.chart_context?.entry_candle?.low;
+    const high = trade.chart_context?.entry_candle?.high;
+    if (!Number.isFinite(low) || !Number.isFinite(high)) return trade;
+    const touching = labels.filter(
+      (label) => Number.isFinite(label.price) && label.price >= low && label.price <= high,
+    );
+    const tags = new Set(trade.tags || []);
+    touching.forEach((level) => {
+      const tag = classifyLevelLabel(level.text);
+      if (tag) tags.add(tag);
+    });
+    return {
+      ...trade,
+      tags: [...tags],
+      chart_context: {
+        ...trade.chart_context,
+        touching_drawings: [
+          ...(trade.chart_context?.touching_drawings || []),
+          ...touching.map((level) => ({
+            kind: "indicator_level",
+            label: level.text || level.study,
+            price_low: level.price,
+            price_high: level.price,
+          })),
+        ].slice(0, 50),
+      },
+    };
+  });
+}
 
 function dependencies(overrides = {}) {
   return {
@@ -14,6 +76,7 @@ function dependencies(overrides = {}) {
     evaluateAsync: overrides.evaluateAsync || defaultEvaluateAsync,
     captureScreenshot: overrides.captureScreenshot || captureChartScreenshot,
     fetch: overrides.fetch || globalThis.fetch,
+    getPineLabels: overrides.getPineLabels || getPineLabels,
   };
 }
 
@@ -213,6 +276,93 @@ export const backtestExtractionExpression = `
       }
       return -1;
     }
+    function dateOf(item) {
+      return timeData(item.value[0] * 1000).date;
+    }
+    function minutesOf(item) {
+      var dt = new Date(item.value[0] * 1000);
+      var hour = parseInt(dt.toLocaleTimeString('en-US', {
+        timeZone: zone, hour: '2-digit', hour12: false
+      }));
+      var minute = parseInt(dt.toLocaleTimeString('en-US', {
+        timeZone: zone, minute: '2-digit'
+      }));
+      return hour * 60 + minute;
+    }
+    function range(items) {
+      if (!items.length) return { high: null, low: null };
+      return {
+        high: Math.max.apply(null, items.map(function(item) { return item.value[2]; })),
+        low: Math.min.apply(null, items.map(function(item) { return item.value[3]; }))
+      };
+    }
+    function rangePosition(price, values) {
+      if (values.high == null || values.low == null) return 'unavailable';
+      return price <= values.high && price >= values.low ? 'inside' : 'outside';
+    }
+    var barsByDate = new Map();
+    barsItems.forEach(function(item) {
+      var date = dateOf(item);
+      if (!barsByDate.has(date)) barsByDate.set(date, []);
+      barsByDate.get(date).push(item);
+    });
+    var uniqueDates = Array.from(barsByDate.keys());
+    var sessionCache = new Map();
+    function sessionContext(index, entryPrice) {
+      var entryItem = barsItems[index];
+      var entryDate = dateOf(entryItem);
+      if (!sessionCache.has(entryDate)) {
+        var dateIndex = uniqueDates.indexOf(entryDate);
+        var previousDate = dateIndex > 0 ? uniqueDates[dateIndex - 1] : null;
+        var previousItems = previousDate ? (barsByDate.get(previousDate) || []) : [];
+        var entryItems = barsByDate.get(entryDate) || [];
+        var previousRth = previousItems.filter(function(item) {
+          var minutes = minutesOf(item);
+          return minutes >= 390 && minutes < 780;
+        });
+        var previousDay = range(previousRth);
+        previousDay.close = previousRth.length
+          ? previousRth[previousRth.length - 1].value[4] : null;
+        var premarket = range(entryItems.filter(function(item) {
+          var minutes = minutesOf(item);
+          return minutes >= 60 && minutes < 390;
+        }));
+        var first5 = range(entryItems.filter(function(item) {
+          var minutes = minutesOf(item);
+          return minutes >= 390 && minutes < 395;
+        }));
+        var first15 = range(entryItems.filter(function(item) {
+          var minutes = minutesOf(item);
+          return minutes >= 390 && minutes < 405;
+        }));
+        var openItem = entryItems.find(function(item) { return minutesOf(item) === 390; });
+        sessionCache.set(entryDate, {
+          previous_day: previousDay,
+          premarket: premarket,
+          first_5m: first5,
+          first_15m: first15,
+          session_open: openItem ? openItem.value[1] : null
+        });
+      }
+      var base = sessionCache.get(entryDate);
+      var entryMinutes = minutesOf(entryItem);
+      return {
+        previous_day: {
+          high: base.previous_day.high,
+          low: base.previous_day.low,
+          close: base.previous_day.close,
+          position: rangePosition(entryPrice, base.previous_day)
+        },
+        premarket: {
+          high: base.premarket.high,
+          low: base.premarket.low,
+          position: rangePosition(entryPrice, base.premarket)
+        },
+        first_5m: entryMinutes >= 395 ? base.first_5m : { high: null, low: null },
+        first_15m: entryMinutes >= 405 ? base.first_15m : { high: null, low: null },
+        session_open: base.session_open
+      };
+    }
     function rrFrom(profit, stop) {
       if (profit == null || stop == null || stop === 0) return null;
       var ratio = profit / stop;
@@ -225,6 +375,12 @@ export const backtestExtractionExpression = `
         try { return textValue(value.value()); } catch (error) {}
       }
       return textValue(value.text || value.content || value.value || value.title);
+    }
+    function propertyBoolean(value) {
+      if (value && typeof value.value === 'function') {
+        try { return Boolean(value.value()); } catch (error) { return false; }
+      }
+      return Boolean(value);
     }
     function noteText(shape, properties) {
       var candidates = [
@@ -285,6 +441,32 @@ export const backtestExtractionExpression = `
       var stop = properties.stopLevel == null ? null : properties.stopLevel;
       var result = outcome(index, entryPrice, profit, stop, isLong);
       var context = timeData(barsItems[index].value[0] * 1000);
+      var entryValue = barsItems[index].value;
+      var sessions = sessionContext(index, entryPrice);
+      var capturedTags = [];
+      if (sessions.previous_day.position !== 'unavailable') {
+        capturedTags.push(sessions.previous_day.position === 'inside'
+          ? 'bt_position_inside_prior_day' : 'bt_position_outside_prior_day');
+      }
+      if (sessions.premarket.position !== 'unavailable') {
+        capturedTags.push(sessions.premarket.position === 'inside'
+          ? 'bt_position_inside_premarket' : 'bt_position_outside_premarket');
+      }
+      function touchLevel(price, tag) {
+        if (price != null && entryValue[3] <= price && entryValue[2] >= price) {
+          capturedTags.push(tag);
+        }
+      }
+      touchLevel(sessions.previous_day.high, 'bt_confluence_prior_day_high');
+      touchLevel(sessions.previous_day.low, 'bt_confluence_prior_day_low');
+      touchLevel(sessions.previous_day.close, 'bt_confluence_prior_day_close');
+      touchLevel(sessions.premarket.high, 'bt_confluence_premarket_high');
+      touchLevel(sessions.premarket.low, 'bt_confluence_premarket_low');
+      touchLevel(sessions.first_5m.high, 'bt_confluence_first_5m_high');
+      touchLevel(sessions.first_5m.low, 'bt_confluence_first_5m_low');
+      touchLevel(sessions.first_15m.high, 'bt_confluence_first_15m_high');
+      touchLevel(sessions.first_15m.low, 'bt_confluence_first_15m_low');
+      touchLevel(sessions.session_open, 'bt_confluence_session_open');
       var targetPrice = entryPrice != null
         ? (isLong ? entryPrice + (profit || 0) / 100 : entryPrice - (profit || 0) / 100)
         : 0;
@@ -304,17 +486,71 @@ export const backtestExtractionExpression = `
         stop_price: Number(stopPrice.toFixed(2)),
         rr: rrFrom(profit, stop),
         outcome: result.outcome,
-        tags: [],
+        tags: Array.from(new Set(capturedTags)),
         notes: '',
+        chart_context: {
+          entry_candle: {
+            open: entryValue[1], high: entryValue[2], low: entryValue[3], close: entryValue[4]
+          },
+          ranges: sessions,
+          touching_drawings: []
+        },
         _entry_time: entryTime,
         _entry_price: entryPrice
       });
+      } catch (error) {}
+    }
+    var drawingShapes = allShapes.filter(function(meta) {
+      return meta.name === 'rectangle' || meta.name === 'horizontal_line'
+        || meta.name === 'horizontal_ray' || meta.name === 'trend_line';
+    });
+    for (var drawingIndex = 0; drawingIndex < drawingShapes.length; drawingIndex++) {
+      try {
+        var drawingMeta = drawingShapes[drawingIndex];
+        var drawing = chart.getShapeById(drawingMeta.id);
+        var drawingProperties = drawing && drawing.getProperties ? drawing.getProperties() : {};
+        var drawingPoints = drawing && drawing.getPoints ? drawing.getPoints() : [];
+        if (!drawingPoints.length) continue;
+        var drawingPrices = drawingPoints.map(function(point) { return Number(point.price); })
+          .filter(Number.isFinite);
+        var drawingTimes = drawingPoints.map(function(point) { return Number(point.time); })
+          .filter(Number.isFinite);
+        if (!drawingPrices.length) continue;
+        var priceLow = Math.min.apply(null, drawingPrices);
+        var priceHigh = Math.max.apply(null, drawingPrices);
+        var timeLow = drawingTimes.length ? Math.min.apply(null, drawingTimes) : null;
+        var timeHigh = drawingTimes.length ? Math.max.apply(null, drawingTimes) : null;
+        var drawingLabel = noteText(drawing, drawingProperties) || drawingMeta.name;
+        for (var drawingTradeIndex = 0; drawingTradeIndex < trades.length; drawingTradeIndex++) {
+          var drawingTrade = trades[drawingTradeIndex];
+          var candle = drawingTrade.chart_context.entry_candle;
+          var priceTouches = candle.low <= priceHigh && candle.high >= priceLow;
+          var timeTouches = timeLow == null || timeHigh == null
+            || (drawingTrade._entry_time >= timeLow && drawingTrade._entry_time <= timeHigh)
+            || (propertyBoolean(drawingProperties.extendRight)
+              && drawingTrade._entry_time >= timeLow)
+            || (propertyBoolean(drawingProperties.extendLeft)
+              && drawingTrade._entry_time <= timeHigh);
+          if (!priceTouches || !timeTouches) continue;
+          if (drawingTrade.chart_context.touching_drawings.length < 50) {
+            drawingTrade.chart_context.touching_drawings.push({
+              kind: drawingMeta.name,
+              label: drawingLabel,
+              price_low: priceLow,
+              price_high: priceHigh
+            });
+          }
+          drawingTrade.tags.push(drawingMeta.name === 'rectangle'
+            ? 'bt_confluence_decision_zone' : 'bt_confluence_manual_level');
+          drawingTrade.tags = Array.from(new Set(drawingTrade.tags));
+        }
       } catch (error) {}
     }
     var notes = [];
     for (var noteIndex = 0; noteIndex < allShapes.length; noteIndex++) {
       var noteMeta = allShapes[noteIndex];
       if (noteMeta.name === 'long_position' || noteMeta.name === 'short_position') continue;
+      if (!/text|note|callout|balloon/i.test(noteMeta.name || '')) continue;
       try {
         var noteShape = chart.getShapeById(noteMeta.id);
         if (!noteShape) continue;
@@ -395,9 +631,15 @@ export async function captureJournal({
 
 export async function captureBacktestBatch({ idempotencyKey, _deps } = {}) {
   const deps = dependencies(_deps);
-  const trades = await deps.evaluate(backtestExtractionExpression);
+  let trades = await deps.evaluate(backtestExtractionExpression);
   if (!trades.length)
     throw new Error("No long or short position drawings were found");
+  try {
+    const labels = await deps.getPineLabels({ max_labels: 250 });
+    trades = enrichTradesWithStudyLabels(trades, labels);
+  } catch {
+    // Manual rectangles and session calculations still provide useful context.
+  }
   const base64 = await deps.captureScreenshot(deps.evaluate);
   const payload = {
     trades,

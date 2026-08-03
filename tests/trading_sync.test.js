@@ -4,6 +4,8 @@ import {
   backtestExtractionExpression,
   captureBacktestBatch,
   captureJournal,
+  classifyLevelLabel,
+  enrichTradesWithStudyLabels,
 } from "../src/core/trading-sync.js";
 
 function response(body, status = 201, replayed = false) {
@@ -104,11 +106,15 @@ describe("Trading backtest batch capture sync", () => {
   it("associates a nearby text drawing with the closest position", () => {
     const entryTime = 1785591300;
     const bars = [
-      { value: [entryTime, 629, 631, 628] },
-      { value: [entryTime + 60, 630, 633, 629.5] },
+      { value: [entryTime - 86400, 629, 632, 626, 629] },
+      { value: [entryTime - 600, 629, 631, 628, 630] },
+      { value: [entryTime - 300, 629, 630, 628.5, 629.5] },
+      { value: [entryTime, 629, 631, 628, 630] },
+      { value: [entryTime + 60, 630, 633, 629.5, 632] },
     ];
     const shapes = [
       { id: "position", name: "long_position" },
+      { id: "zone", name: "rectangle" },
       { id: "reason", name: "text" },
       { id: "far-note", name: "text" },
     ];
@@ -116,6 +122,13 @@ describe("Trading backtest batch capture sync", () => {
       position: {
         getProperties: () => ({ profitLevel: 200, stopLevel: 100 }),
         getPoints: () => [{ time: entryTime, price: 630 }],
+      },
+      zone: {
+        getProperties: () => ({ extendRight: { value: () => true } }),
+        getPoints: () => [
+          { time: entryTime - 120, price: 629.5 },
+          { time: entryTime - 60, price: 630.5 },
+        ],
       },
       reason: {
         getProperties: () => ({ text: "Flip zone held after displacement" }),
@@ -140,7 +153,45 @@ describe("Trading backtest batch capture sync", () => {
     const trades = run({ TradingViewApi: { activeChart: () => chart } });
     assert.equal(trades.length, 1);
     assert.equal(trades[0].notes, "Flip zone held after displacement");
+    assert.ok(trades[0].tags.includes("bt_confluence_decision_zone"));
+    assert.ok(trades[0].tags.includes("bt_position_inside_prior_day"));
+    assert.ok(trades[0].tags.includes("bt_position_inside_premarket"));
+    assert.ok(trades[0].tags.includes("bt_confluence_prior_day_close"));
+    assert.equal(trades[0].chart_context.ranges.first_15m.high, null);
+    assert.equal(trades[0].chart_context.touching_drawings[0].kind, "rectangle");
     assert.equal("_entry_time" in trades[0], false);
+  });
+
+  it("classifies and attaches only supported named indicator levels", () => {
+    assert.equal(classifyLevelLabel("PWH"), "bt_confluence_prior_week_high");
+    assert.equal(classifyLevelLabel("VWAP"), "bt_confluence_vwap");
+    assert.equal(classifyLevelLabel("200 SMA 1h"), "bt_confluence_moving_average");
+    assert.equal(classifyLevelLabel("MHH"), undefined);
+    const [trade] = enrichTradesWithStudyLabels(
+      [
+        {
+          ...backtestTrade,
+          tags: [],
+          chart_context: {
+            entry_candle: { open: 630, high: 631, low: 629, close: 630.5 },
+            touching_drawings: [],
+          },
+        },
+      ],
+      {
+        studies: [
+          { name: "Key Levels", labels: [{ text: "PWH", price: 630 }] },
+          { name: "Combined Indicator", labels: [{ text: "VWAP", price: 630.25 }] },
+          { name: "Market Structures", labels: [{ text: "MHH", price: 630.4 }] },
+          { name: "Key Levels", labels: [{ text: "PDH", price: 635 }] },
+        ],
+      },
+    );
+    assert.deepEqual(trade.tags.sort(), [
+      "bt_confluence_prior_week_high",
+      "bt_confluence_vwap",
+    ]);
+    assert.equal(trade.chart_context.touching_drawings.length, 2);
   });
 
   it("sends one screenshot for the complete calculated batch", () =>
@@ -154,6 +205,7 @@ describe("Trading backtest batch capture sync", () => {
             return [backtestTrade, { ...backtestTrade, type: "Put" }];
           },
           captureScreenshot: async () => "cG5n",
+          getPineLabels: async () => ({ success: true, studies: [] }),
           fetch: async (url, options) => {
             request = { url, options };
             return response({ records: [{ id: 1 }, { id: 2 }] });
