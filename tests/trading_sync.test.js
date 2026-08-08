@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   backtestExtractionExpression,
   captureBacktestBatch,
+  captureBacktestDay,
   captureJournal,
   classifyLevelLabel,
+  createBacktestExtractionExpression,
   enrichTradesWithStudyLabels,
 } from "../src/core/trading-sync.js";
 
@@ -116,6 +118,7 @@ describe("Trading backtest batch capture sync", () => {
       { id: "position", name: "long_position" },
       { id: "zone", name: "rectangle" },
       { id: "reason", name: "text" },
+      { id: "daily-thought", name: "text" },
       { id: "far-note", name: "text" },
     ];
     const shapeById = {
@@ -131,7 +134,13 @@ describe("Trading backtest batch capture sync", () => {
         ],
       },
       reason: {
-        getProperties: () => ({ text: "Flip zone held after displacement" }),
+        getProperties: () => ({
+          text: "Flip zone held after displacement",
+        }),
+        getPoints: () => [{ time: entryTime + 60, price: 630.5 }],
+      },
+      "daily-thought": {
+        getProperties: () => ({ text: "DAY: Waited for opening range" }),
         getPoints: () => [{ time: entryTime + 60, price: 630.5 }],
       },
       "far-note": {
@@ -158,14 +167,74 @@ describe("Trading backtest batch capture sync", () => {
     assert.ok(trades[0].tags.includes("bt_position_inside_premarket"));
     assert.ok(trades[0].tags.includes("bt_confluence_prior_day_close"));
     assert.equal(trades[0].chart_context.ranges.first_15m.high, null);
-    assert.equal(trades[0].chart_context.touching_drawings[0].kind, "rectangle");
+    assert.equal(
+      trades[0].chart_context.touching_drawings[0].kind,
+      "rectangle",
+    );
     assert.equal("_entry_time" in trades[0], false);
+  });
+
+  it("audits ambiguous and unassigned trade notes without attaching them", () => {
+    const entryTime = 1785591300;
+    const bars = [
+      { value: [entryTime, 629, 631, 628, 630] },
+      { value: [entryTime + 60, 630, 631, 629, 630] },
+    ];
+    const shapes = [
+      { id: "one", name: "long_position" },
+      { id: "two", name: "long_position" },
+      { id: "between", name: "text" },
+      { id: "far", name: "text" },
+    ];
+    const positions = {
+      one: {
+        getProperties: () => ({ profitLevel: 100, stopLevel: 100 }),
+        getPoints: () => [{ time: entryTime, price: 629.9 }],
+      },
+      two: {
+        getProperties: () => ({ profitLevel: 100, stopLevel: 100 }),
+        getPoints: () => [{ time: entryTime, price: 630.1 }],
+      },
+      between: {
+        getProperties: () => ({ text: "Waited for confirmation" }),
+        getPoints: () => [{ time: entryTime, price: 630 }],
+      },
+      far: {
+        getProperties: () => ({ text: "Tomorrow's idea" }),
+        getPoints: () => [{ time: entryTime + 10000, price: 630 }],
+      },
+    };
+    const chart = {
+      getSeries: () => ({ data: () => ({ bars: () => ({ _items: bars }) }) }),
+      symbolExt: () => ({ symbol: "SPY" }),
+      resolution: () => "1",
+      getAllShapes: () => shapes,
+      getShapeById: (id) => positions[id],
+    };
+    const run = new Function(
+      "window",
+      `return (${createBacktestExtractionExpression(null, null, true).trim()});`,
+    );
+    const result = run({
+      location: { pathname: "/chart/layout/" },
+      TradingViewApi: { activeChart: () => chart },
+    });
+    assert.equal(result.trades.length, 2);
+    assert.deepEqual(
+      result.note_audit.map((note) => note.status),
+      ["ambiguous", "unassigned"],
+    );
+    assert.equal(result.trades[0].notes, "");
+    assert.equal(result.trades[1].notes, "");
   });
 
   it("classifies and attaches only supported named indicator levels", () => {
     assert.equal(classifyLevelLabel("PWH"), "bt_confluence_prior_week_high");
     assert.equal(classifyLevelLabel("VWAP"), "bt_confluence_vwap");
-    assert.equal(classifyLevelLabel("200 SMA 1h"), "bt_confluence_moving_average");
+    assert.equal(
+      classifyLevelLabel("200 SMA 1h"),
+      "bt_confluence_moving_average",
+    );
     assert.equal(classifyLevelLabel("MHH"), undefined);
     const [trade] = enrichTradesWithStudyLabels(
       [
@@ -181,8 +250,14 @@ describe("Trading backtest batch capture sync", () => {
       {
         studies: [
           { name: "Key Levels", labels: [{ text: "PWH", price: 630 }] },
-          { name: "Combined Indicator", labels: [{ text: "VWAP", price: 630.25 }] },
-          { name: "Market Structures", labels: [{ text: "MHH", price: 630.4 }] },
+          {
+            name: "Combined Indicator",
+            labels: [{ text: "VWAP", price: 630.25 }],
+          },
+          {
+            name: "Market Structures",
+            labels: [{ text: "MHH", price: 630.4 }],
+          },
           { name: "Key Levels", labels: [{ text: "PDH", price: 635 }] },
         ],
       },
@@ -220,5 +295,109 @@ describe("Trading backtest batch capture sync", () => {
       assert.equal(body.trades.length, 2);
       assert.equal(body.screenshot.base64, "cG5n");
       assert.equal("chart" in body.trades[0], false);
+    }));
+
+  it("reconciles only the selected day with fresh invocation keys", () =>
+    withConfiguration(async () => {
+      const requests = [];
+      const dayTrade = {
+        ...backtestTrade,
+        source_id: "/chart/test-layout/::position-1",
+        notes: "Retest held",
+      };
+      const deps = {
+        evaluateAsync: async (expression) => {
+          assert.match(expression, /requestSelectBar/);
+          return "2026-08-01";
+        },
+        evaluate: async (expression) => {
+          if (expression.includes("backtest-day-inventory")) {
+            return [
+              { source_id: dayTrade.source_id, entry_time: 1785591300 },
+              {
+                source_id: "/chart/test-layout/::position-2",
+                entry_time: 1785591360,
+              },
+            ];
+          }
+          if (expression.includes("backtest-day-notes")) {
+            return { count: 1, note: "Waited for the opening range." };
+          }
+          if (expression.includes("getVisibleRange")) {
+            return {
+              date_visible: true,
+              visible_from: "2026-08-01",
+              visible_to: "2026-08-01",
+            };
+          }
+          return {
+            trades: [dayTrade, { ...dayTrade, chart_date: "2026-07-31" }],
+            note_audit: [
+              {
+                source_id: "/chart/test-layout/::note-1",
+                text: "Retest held",
+                status: "assigned",
+                trade_source_id: dayTrade.source_id,
+                candidate_source_ids: [dayTrade.source_id],
+              },
+            ],
+          };
+        },
+        captureScreenshot: async () => "cG5n",
+        getPineLabels: async () => ({ success: true, studies: [] }),
+        fetch: async (url, options) => {
+          requests.push({ url, options });
+          return response({
+            capture_date: "2026-08-01",
+            summary: { inserted: 1, updated: 0, unchanged: 0, skipped: 1 },
+            records: [{ id: 1 }],
+          });
+        },
+      };
+
+      await captureBacktestDay({ _deps: deps });
+      await captureBacktestDay({ _deps: deps });
+
+      const body = JSON.parse(requests[0].options.body);
+      assert.equal(
+        requests[0].url,
+        "http://127.0.0.1:5555/ingestion/backtest/day",
+      );
+      assert.equal(body.capture_date, "2026-08-01");
+      assert.equal(body.trades.length, 1);
+      assert.equal(body.daily_note, "Waited for the opening range.");
+      assert.equal(body.skipped.length, 1);
+      assert.equal(body.trade_notes_found, 1);
+      assert.equal(body.screenshot_context.date_visible, true);
+      assert.notEqual(
+        requests[0].options.headers["Idempotency-Key"],
+        requests[1].options.headers["Idempotency-Key"],
+      );
+    }));
+
+  it("refuses a day capture when that date is not visible for the screenshot", () =>
+    withConfiguration(async () => {
+      await assert.rejects(
+        captureBacktestDay({
+          date: "2026-08-01",
+          _deps: {
+            evaluate: async (expression) => {
+              if (expression.includes("backtest-day-inventory")) return [];
+              if (expression.includes("backtest-day-notes")) {
+                return { count: 0, note: null };
+              }
+              if (expression.includes("getVisibleRange")) {
+                return {
+                  date_visible: false,
+                  visible_from: "2026-08-02",
+                  visible_to: "2026-08-03",
+                };
+              }
+              return { trades: [], note_audit: [] };
+            },
+          },
+        }),
+        /not visible in the active chart/,
+      );
     }));
 });

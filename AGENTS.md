@@ -1,6 +1,6 @@
 # TradingView MCP — Codex Instructions
 
-94 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+95 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 

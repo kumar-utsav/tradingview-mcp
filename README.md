@@ -158,9 +158,12 @@ The authenticated trading capture tools are:
 - `capture_journal_put_trade`
 - `capture_journal_call_miss`
 - `capture_journal_put_miss`
+- `capture_backtest_day`
 - `capture_backtest_batch`
 
-Journal tools wait for an interactive bar selection in TradingView. All five tools capture the chart locally and send the result directly to the configured backend; the web frontend is notified after the database transaction commits.
+Journal tools wait for an interactive bar selection in TradingView. All capture tools take the chart locally and send the result directly to the configured backend; the web frontend is notified after the database transaction commits.
+
+`capture_backtest_day` is the recommended ongoing workflow. Pass a Pacific date or omit it and select any candle on the desired day. Keep that day visible on the active chart so the retained overview screenshot can be verified. Only positions whose entry point belongs to that date are reconciled. Prefix only the day's overall thought with `DAY:`; every other text or note drawing is treated as a position-specific trade note. Notes that are equally close to multiple positions, or too far from every position, are reported for review rather than silently assigned. Re-running the same date inserts new position drawings, updates changed drawings, leaves unchanged trades alone, and reports unreadable positions or likely redrawn duplicates. It never deletes a stored trade because its TradingView drawing is missing. Same-candle target and stop hits are stored as `Ambiguous`; trades without enough loaded future bars are stored as `Needs Review`.
 
 For `capture_backtest_batch`, draw each long/short position and put a TradingView
 text or note drawing beside it with the trade reasoning. A note is assigned to
@@ -428,7 +431,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (94 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (95 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   evaluate as defaultEvaluate,
   evaluateAsync as defaultEvaluateAsync,
@@ -44,7 +44,10 @@ export function enrichTradesWithStudyLabels(trades, labelResult) {
     const high = trade.chart_context?.entry_candle?.high;
     if (!Number.isFinite(low) || !Number.isFinite(high)) return trade;
     const touching = labels.filter(
-      (label) => Number.isFinite(label.price) && label.price >= low && label.price <= high,
+      (label) =>
+        Number.isFinite(label.price) &&
+        label.price >= low &&
+        label.price <= high,
     );
     const tags = new Set(trade.tags || []);
     touching.forEach((level) => {
@@ -246,7 +249,12 @@ function journalExtractionExpression(type) {
   })()`;
 }
 
-export const backtestExtractionExpression = `
+export function createBacktestExtractionExpression(
+  maxTrades = MAX_TRADES_BATCH,
+  targetDate = null,
+  includeAudit = false,
+) {
+  return `
   (function() {
     var chart = window.TradingViewApi.activeChart
       ? window.TradingViewApi.activeChart()
@@ -257,6 +265,10 @@ export const backtestExtractionExpression = `
     var symbolInfo = chart.symbolExt();
     var symbol = symbolInfo && (symbolInfo.symbol || symbolInfo.ticker);
     var timeFrame = Number(chart.resolution());
+    var targetDate = ${JSON.stringify(targetDate)};
+    var includeAudit = ${JSON.stringify(includeAudit)};
+    var chartSource = window.location && window.location.pathname
+      ? window.location.pathname : 'active-chart';
     var zone = 'America/Los_Angeles';
     var timeCache = new Map();
     function timeData(tsMs) {
@@ -401,7 +413,7 @@ export const backtestExtractionExpression = `
     }
     function outcome(startIndex, entryPrice, profit, stop, isLong) {
       if (profit == null || stop == null || entryPrice == null || startIndex < 0) {
-        return { outcome: 'Open', exit_candle: null, duration_minutes: null };
+        return { outcome: 'Needs Review', exit_candle: null, duration_minutes: null };
       }
       var target = isLong ? entryPrice + profit / 100 : entryPrice - profit / 100;
       var stopPrice = isLong ? entryPrice - stop / 100 : entryPrice + stop / 100;
@@ -412,17 +424,18 @@ export const backtestExtractionExpression = `
         var stopHit = isLong ? value[3] <= stopPrice : value[2] >= stopPrice;
         if (!targetHit && !stopHit) continue;
         return {
-          outcome: targetHit && !stopHit ? 'Win' : 'Loss',
+          outcome: targetHit && stopHit
+            ? 'Ambiguous' : (targetHit ? 'Win' : 'Loss'),
           exit_candle: timeData(value[0] * 1000).time,
           duration_minutes: (value[0] - entryTs) / 60
         };
       }
-      return { outcome: 'Open', exit_candle: null, duration_minutes: null };
+      return { outcome: 'Needs Review', exit_candle: null, duration_minutes: null };
     }
     var allShapes = chart.getAllShapes() || [];
     var shapes = allShapes.filter(function(shape) {
       return shape.name === 'long_position' || shape.name === 'short_position';
-    }).slice(0, ${MAX_TRADES_BATCH});
+    })${maxTrades == null ? "" : `.slice(0, ${maxTrades})`};
     var trades = [];
     for (var i = 0; i < shapes.length; i++) {
       try {
@@ -434,6 +447,7 @@ export const backtestExtractionExpression = `
       if (!points.length) continue;
       var entryTime = points[0].time;
       var entryPrice = points[0].price;
+      if (targetDate && timeData(Number(entryTime) * 1000).date !== targetDate) continue;
       var index = entryTime == null ? -1 : barIndex(entryTime);
       if (index < 0) continue;
       var isLong = meta.name === 'long_position';
@@ -474,6 +488,7 @@ export const backtestExtractionExpression = `
         ? (isLong ? entryPrice - (stop || 0) / 100 : entryPrice + (stop || 0) / 100)
         : 0;
       trades.push({
+        source_id: chartSource + '::' + String(meta.id),
         ticker: symbol,
         time_frame: timeFrame,
         chart_date: context.date,
@@ -496,7 +511,8 @@ export const backtestExtractionExpression = `
           touching_drawings: []
         },
         _entry_time: entryTime,
-        _entry_price: entryPrice
+        _entry_price: entryPrice,
+        _entry_date: context.date
       });
       } catch (error) {}
     }
@@ -555,13 +571,17 @@ export const backtestExtractionExpression = `
         var noteShape = chart.getShapeById(noteMeta.id);
         if (!noteShape) continue;
         var noteProperties = noteShape.getProperties ? noteShape.getProperties() : {};
-        var text = noteText(noteShape, noteProperties);
+        var rawText = noteText(noteShape, noteProperties);
+        if (!rawText || /^DAY\\s*:/i.test(rawText)) continue;
+        var text = rawText.replace(/^TRADE\\s*:\\s*/i, '').trim();
         if (!text) continue;
         var notePoints = noteShape.getPoints ? noteShape.getPoints() : [];
         if (!notePoints.length || notePoints[0].time == null) continue;
         notes.push({
+          source_id: chartSource + '::' + String(noteMeta.id),
           text: text,
           time: Number(notePoints[0].time),
+          date: timeData(Number(notePoints[0].time) * 1000).date,
           price: notePoints[0].price == null ? null : Number(notePoints[0].price)
         });
       } catch (error) {}
@@ -573,11 +593,12 @@ export const backtestExtractionExpression = `
       60,
       Number.isFinite(timeFrame) ? timeFrame * 60 : 60
     );
+    var noteAudit = [];
     for (var n = 0; n < notes.length; n++) {
-      var bestIndex = -1;
-      var bestScore = Infinity;
+      var candidates = [];
       for (var tradeIndex = 0; tradeIndex < trades.length; tradeIndex++) {
         var candidate = trades[tradeIndex];
+        if (notes[n].date !== candidate._entry_date) continue;
         var timeDistance = Math.abs(notes[n].time - candidate._entry_time);
         var maxTimeDistance = secondsPerBar * 40;
         if (timeDistance > maxTimeDistance) continue;
@@ -587,24 +608,193 @@ export const backtestExtractionExpression = `
         var maxPriceDistance = Math.max(Math.abs(candidate._entry_price) * 0.12, 1);
         if (priceDistance > maxPriceDistance) continue;
         var score = timeDistance / maxTimeDistance + priceDistance / maxPriceDistance;
-        if (score < bestScore) {
-          bestScore = score;
-          bestIndex = tradeIndex;
-        }
+        candidates.push({ index: tradeIndex, score: score });
       }
-      if (bestIndex >= 0) {
-        trades[bestIndex].notes = trades[bestIndex].notes
-          ? trades[bestIndex].notes + '\\n\\n' + notes[n].text
+      candidates.sort(function(left, right) { return left.score - right.score; });
+      var best = candidates[0];
+      var second = candidates[1];
+      var ambiguous = best && second && second.score - best.score <= 0.15;
+      if (best && !ambiguous) {
+        trades[best.index].notes = trades[best.index].notes
+          ? trades[best.index].notes + '\\n\\n' + notes[n].text
           : notes[n].text;
+        noteAudit.push({
+          source_id: notes[n].source_id,
+          text: notes[n].text.slice(0, 500),
+          status: 'assigned',
+          trade_source_id: trades[best.index].source_id,
+          candidate_source_ids: [trades[best.index].source_id]
+        });
+      } else {
+        noteAudit.push({
+          source_id: notes[n].source_id,
+          text: notes[n].text,
+          status: ambiguous ? 'ambiguous' : 'unassigned',
+          trade_source_id: null,
+          candidate_source_ids: candidates.slice(0, 3).map(function(item) {
+            return trades[item.index].source_id;
+          })
+        });
       }
     }
     for (var cleanIndex = 0; cleanIndex < trades.length; cleanIndex++) {
       delete trades[cleanIndex]._entry_time;
       delete trades[cleanIndex]._entry_price;
+      delete trades[cleanIndex]._entry_date;
     }
-    return trades;
+    return includeAudit ? { trades: trades, note_audit: noteAudit } : trades;
   })()
 `;
+}
+
+export const backtestExtractionExpression =
+  createBacktestExtractionExpression(MAX_TRADES_BATCH);
+
+function dayPositionInventoryExpression(targetDate) {
+  return `
+    (function() {
+      /* backtest-day-inventory */
+      var chart = window.TradingViewApi.activeChart
+        ? window.TradingViewApi.activeChart()
+        : ${CHART_API};
+      if (!chart) throw new Error('No active chart found');
+      var chartSource = window.location && window.location.pathname
+        ? window.location.pathname : 'active-chart';
+      var zone = 'America/Los_Angeles';
+      function dateOf(timestamp) {
+        var value = new Date(Number(timestamp) * 1000).toLocaleDateString('en-CA', {
+          timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit'
+        });
+        return value;
+      }
+      var result = [];
+      var shapes = chart.getAllShapes() || [];
+      for (var index = 0; index < shapes.length; index++) {
+        var meta = shapes[index];
+        if (meta.name !== 'long_position' && meta.name !== 'short_position') continue;
+        try {
+          var shape = chart.getShapeById(meta.id);
+          var points = shape && shape.getPoints ? shape.getPoints() : [];
+          if (!points.length || points[0].time == null) continue;
+          if (dateOf(points[0].time) !== ${JSON.stringify(targetDate)}) continue;
+          result.push({
+            source_id: chartSource + '::' + String(meta.id),
+            entry_time: Number(points[0].time)
+          });
+        } catch (error) {}
+      }
+      return result;
+    })()
+  `;
+}
+
+function dayNotesExtractionExpression(targetDate) {
+  return `
+    (function() {
+      /* backtest-day-notes */
+      var chart = window.TradingViewApi.activeChart
+        ? window.TradingViewApi.activeChart()
+        : ${CHART_API};
+      if (!chart) throw new Error('No active chart found');
+      var zone = 'America/Los_Angeles';
+      function textValue(value) {
+        if (typeof value === 'string') return value.trim();
+        if (!value || typeof value !== 'object') return '';
+        if (typeof value.value === 'function') {
+          try { return textValue(value.value()); } catch (error) {}
+        }
+        return textValue(value.text || value.content || value.value || value.title);
+      }
+      function noteText(shape, properties) {
+        var candidates = [properties.text, properties.content, properties.note,
+          properties.description, properties.title];
+        if (shape && typeof shape.getText === 'function') {
+          try { candidates.push(shape.getText()); } catch (error) {}
+        }
+        for (var i = 0; i < candidates.length; i++) {
+          var text = textValue(candidates[i]);
+          if (text) return text.slice(0, 50000);
+        }
+        return '';
+      }
+      function dateOf(timestamp) {
+        return new Date(Number(timestamp) * 1000).toLocaleDateString('en-CA', {
+          timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit'
+        });
+      }
+      var notes = [];
+      var shapes = chart.getAllShapes() || [];
+      for (var index = 0; index < shapes.length; index++) {
+        var meta = shapes[index];
+        if (!/text|note|callout|balloon/i.test(meta.name || '')) continue;
+        try {
+          var shape = chart.getShapeById(meta.id);
+          var properties = shape && shape.getProperties ? shape.getProperties() : {};
+          var rawText = noteText(shape, properties);
+          if (!/^DAY\\s*:/i.test(rawText)) continue;
+          var text = rawText.replace(/^DAY\\s*:\\s*/i, '').trim();
+          var points = shape && shape.getPoints ? shape.getPoints() : [];
+          if (!text || !points.length || points[0].time == null) continue;
+          if (dateOf(points[0].time) !== ${JSON.stringify(targetDate)}) continue;
+          notes.push({
+            text: text,
+            time: Number(points[0].time),
+            price: points[0].price == null ? 0 : Number(points[0].price)
+          });
+        } catch (error) {}
+      }
+      notes.sort(function(left, right) {
+        return left.time - right.time || left.price - right.price;
+      });
+      return {
+        count: notes.length,
+        note: notes.length ? notes.map(function(item) { return item.text; }).join('\\n\\n') : null
+      };
+    })()
+  `;
+}
+
+function selectBacktestDateExpression() {
+  return `(async function() {
+    var chart = window.TradingViewApi.activeChart
+      ? window.TradingViewApi.activeChart()
+      : ${CHART_API};
+    if (!chart) throw new Error('No active chart found');
+    var timestamp = await chart.requestSelectBar();
+    return new Date(Number(timestamp) * 1000).toLocaleDateString('en-CA', {
+      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+  })()`;
+}
+
+function dayScreenshotContextExpression(targetDate) {
+  return `
+    (function() {
+      var chart = window.TradingViewApi.activeChart
+        ? window.TradingViewApi.activeChart()
+        : ${CHART_API};
+      if (!chart) throw new Error('No active chart found');
+      var visible = chart.getVisibleRange ? chart.getVisibleRange() : null;
+      var zone = 'America/Los_Angeles';
+      function dateOf(timestamp) {
+        return new Date(Number(timestamp) * 1000).toLocaleDateString('en-CA', {
+          timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit'
+        });
+      }
+      if (!visible || visible.from == null || visible.to == null) {
+        return { date_visible: false, visible_from: null, visible_to: null };
+      }
+      var fromDate = dateOf(visible.from);
+      var toDate = dateOf(visible.to);
+      return {
+        date_visible: ${JSON.stringify(targetDate)} >= fromDate
+          && ${JSON.stringify(targetDate)} <= toDate,
+        visible_from: fromDate,
+        visible_to: toDate
+      };
+    })()
+  `;
+}
 
 export async function captureJournal({
   type,
@@ -650,6 +840,65 @@ export async function captureBacktestBatch({ idempotencyKey, _deps } = {}) {
     "backtest.batch",
     payload,
     idempotencyKey,
+    deps,
+  );
+}
+
+export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
+  const deps = dependencies(_deps);
+  const captureDate =
+    date || (await deps.evaluateAsync(selectBacktestDateExpression()));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(captureDate || "")) {
+    throw new Error("A valid TradingView chart date is required");
+  }
+
+  const [inventory, extraction, dailyNotes, screenshotContext] = await Promise.all([
+    deps.evaluate(dayPositionInventoryExpression(captureDate)),
+    deps.evaluate(createBacktestExtractionExpression(null, captureDate, true)),
+    deps.evaluate(dayNotesExtractionExpression(captureDate)),
+    deps.evaluate(dayScreenshotContextExpression(captureDate)),
+  ]);
+  if (!screenshotContext?.date_visible) {
+    throw new Error(
+      `The selected date ${captureDate} is not visible in the active chart. Scroll to that day and retry.`,
+    );
+  }
+  let trades = (extraction?.trades || []).filter(
+    (trade) => trade.chart_date === captureDate,
+  );
+  try {
+    const labels = await deps.getPineLabels({ max_labels: 250 });
+    trades = enrichTradesWithStudyLabels(trades, labels);
+  } catch {
+    // Deterministic session and manual-drawing context remains available.
+  }
+
+  const capturedIds = new Set(trades.map((trade) => trade.source_id));
+  const skipped = inventory
+    .filter((position) => !capturedIds.has(position.source_id))
+    .map((position) => ({
+      source_id: position.source_id,
+      entry_time: position.entry_time,
+      reason: "The position entry candle is not loaded or could not be read",
+    }));
+  const base64 = await deps.captureScreenshot(deps.evaluate);
+  const payload = {
+    capture_date: captureDate,
+    positions_found: inventory.length,
+    trades,
+    skipped,
+    daily_note: dailyNotes?.note || null,
+    daily_note_drawings: dailyNotes?.count || 0,
+    trade_notes_found: extraction?.note_audit?.length || 0,
+    note_assignments: extraction?.note_audit || [],
+    screenshot_context: screenshotContext,
+    screenshot: { mime_type: "image/png", base64 },
+  };
+  return postCapture(
+    "/ingestion/backtest/day",
+    "backtest.day",
+    payload,
+    idempotencyKey || randomUUID(),
     deps,
   );
 }

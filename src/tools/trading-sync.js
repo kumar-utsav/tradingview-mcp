@@ -12,6 +12,23 @@ const input = {
     ),
 };
 
+const dayInput = {
+  idempotency_key: z
+    .string()
+    .max(200)
+    .optional()
+    .describe(
+      "Optional retry key. Omit it for a fresh reconciliation invocation.",
+    ),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe(
+      "Optional Pacific chart date. When omitted, TradingView prompts for a candle selection.",
+    ),
+};
+
 const runJournal =
   (type, isMiss) =>
   async ({ idempotency_key }) => {
@@ -52,6 +69,23 @@ export function registerTradingSyncTools(server) {
     "Interactively select a TradingView bar, capture a missed Put, and create a missed journal trade",
     input,
     runJournal("Put", true),
+  );
+  server.tool(
+    "capture_backtest_day",
+    "Reconcile one visible TradingView day, using DAY: for the daily thought and all untagged text as audited trade notes; report stored changes, review items, and likely redrawn duplicates",
+    dayInput,
+    async ({ date, idempotency_key }) => {
+      try {
+        return jsonResult(
+          await core.captureBacktestDay({
+            date,
+            idempotencyKey: idempotency_key,
+          }),
+        );
+      } catch (error) {
+        return jsonResult({ success: false, error: error.message }, true);
+      }
+    },
   );
   server.tool(
     "capture_backtest_batch",
