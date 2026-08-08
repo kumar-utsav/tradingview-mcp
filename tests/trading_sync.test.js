@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  activeChartBoundsExpression,
   backtestExtractionExpression,
   captureBacktestBatch,
   captureBacktestDay,
@@ -105,6 +106,46 @@ describe("Trading journal capture sync", () => {
 });
 
 describe("Trading backtest batch capture sync", () => {
+  it("selects the active chart container in a multi-pane layout", () => {
+    const charts = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
+    const selectors = [];
+    const run = new Function(
+      "window",
+      "document",
+      `return (${activeChartBoundsExpression.trim()});`,
+    );
+    const bounds = run(
+      {
+        TradingViewApi: {
+          _chartWidgetCollection: { getAll: () => charts },
+          _activeChartWidgetWV: { value: () => ({ _chartWidget: charts[3] }) },
+        },
+      },
+      {
+        querySelector: (selector) => {
+          selectors.push(selector);
+          if (selector !== '[aria-label="Chart #4"]') return null;
+          return {
+            getBoundingClientRect: () => ({
+              x: 56,
+              y: 624,
+              width: 2455,
+              height: 697,
+            }),
+          };
+        },
+      },
+    );
+    assert.deepEqual(selectors, ['[aria-label="Chart #4"]']);
+    assert.deepEqual(bounds, {
+      x: 56,
+      y: 624,
+      width: 2455,
+      height: 697,
+      active_index: 3,
+    });
+  });
+
   it("associates a nearby text drawing with the closest position", () => {
     const entryTime = 1785591300;
     const bars = [
