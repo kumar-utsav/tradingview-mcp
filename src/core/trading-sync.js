@@ -605,6 +605,7 @@ export function createBacktestExtractionExpression(
         var noteDate = timeData(Number(notePoints[0].time) * 1000).date;
         if (targetDate && noteDate !== targetDate) continue;
         notes.push({
+          drawing_id: String(noteMeta.id),
           source_id: chartSource + '::' + String(noteMeta.id),
           text: text,
           time: Number(notePoints[0].time),
@@ -646,14 +647,16 @@ export function createBacktestExtractionExpression(
           ? trades[best.index].notes + '\\n\\n' + notes[n].text
           : notes[n].text;
         noteAudit.push({
+          drawing_id: notes[n].drawing_id,
           source_id: notes[n].source_id,
-          text: notes[n].text.slice(0, 500),
+          text: notes[n].text,
           status: 'assigned',
           trade_source_id: trades[best.index].source_id,
           candidate_source_ids: [trades[best.index].source_id]
         });
       } else {
         noteAudit.push({
+          drawing_id: notes[n].drawing_id,
           source_id: notes[n].source_id,
           text: notes[n].text,
           status: ambiguous ? 'ambiguous' : 'unassigned',
@@ -672,6 +675,150 @@ export function createBacktestExtractionExpression(
     return includeAudit ? { trades: trades, note_audit: noteAudit } : trades;
   })()
 `;
+}
+
+export function tradeNoteDeletionExpression(candidates, checkpointKey) {
+  return `
+    (function() {
+      /* backtest-trade-note-delete */
+      var chart = window.TradingViewApi.activeChart
+        ? window.TradingViewApi.activeChart()
+        : ${CHART_API};
+      if (!chart) return { success: false, error: 'No active chart found' };
+      var candidates = ${JSON.stringify(candidates)};
+      var seen = new Set();
+      function textValue(value) {
+        if (typeof value === 'string') return value.trim();
+        if (!value || typeof value !== 'object') return '';
+        if (typeof value.value === 'function') {
+          try { return textValue(value.value()); } catch (error) {}
+        }
+        return textValue(value.text || value.content || value.value || value.title);
+      }
+      function noteText(shape, properties) {
+        var values = [properties.text, properties.content, properties.note,
+          properties.description, properties.title];
+        if (shape && typeof shape.getText === 'function') {
+          try { values.push(shape.getText()); } catch (error) {}
+        }
+        for (var index = 0; index < values.length; index++) {
+          var text = textValue(values[index]);
+          if (text) return text.replace(/^TRADE\\s*:\\s*/i, '').trim();
+        }
+        return '';
+      }
+      var allShapes = chart.getAllShapes() || [];
+      for (var index = 0; index < candidates.length; index++) {
+        var candidate = candidates[index];
+        if (!candidate.drawing_id || seen.has(candidate.drawing_id)) {
+          return { success: false, error: 'A trade note drawing ID was missing or repeated' };
+        }
+        seen.add(candidate.drawing_id);
+        var meta = allShapes.find(function(shape) {
+          return String(shape.id) === candidate.drawing_id;
+        });
+        if (!meta || !/text|note|callout|balloon/i.test(meta.name || '')) {
+          return { success: false, error: 'Trade note drawing was not found: ' + candidate.drawing_id };
+        }
+        var shape = chart.getShapeById(meta.id);
+        var properties = shape && shape.getProperties ? shape.getProperties() : {};
+        if (!shape || noteText(shape, properties) !== candidate.text) {
+          return { success: false, error: 'Trade note changed before it could be removed: ' + candidate.drawing_id };
+        }
+      }
+      var undoModel = chart.chartUndoModel && chart.chartUndoModel();
+      var history = undoModel && undoModel.undoHistory && undoModel.undoHistory();
+      if (!history || typeof history.createUndoCheckpoint !== 'function'
+          || typeof history.undoToCheckpoint !== 'function'
+          || typeof chart.removeEntityWithUndo !== 'function') {
+        return { success: false, error: 'TradingView note removal with undo is unavailable' };
+      }
+      var checkpoints = window.__tradingviewMcpBacktestNoteCheckpoints
+        || (window.__tradingviewMcpBacktestNoteCheckpoints = {});
+      checkpoints[${JSON.stringify(checkpointKey)}] = {
+        history: history,
+        checkpoint: history.createUndoCheckpoint()
+      };
+      for (var removeIndex = 0; removeIndex < candidates.length; removeIndex++) {
+        chart.removeEntityWithUndo(candidates[removeIndex].drawing_id);
+      }
+      var remaining = new Set((chart.getAllShapes() || []).map(function(shape) {
+        return String(shape.id);
+      }));
+      var failed = candidates.filter(function(candidate) {
+        return remaining.has(candidate.drawing_id);
+      });
+      if (failed.length) {
+        var saved = checkpoints[${JSON.stringify(checkpointKey)}];
+        saved.history.undoToCheckpoint(saved.checkpoint);
+        delete checkpoints[${JSON.stringify(checkpointKey)}];
+        return { success: false, error: 'TradingView did not remove every assigned trade note' };
+      }
+      return {
+        success: true,
+        removed_ids: candidates.map(function(candidate) { return candidate.drawing_id; })
+      };
+    })()
+  `;
+}
+
+export function finishTradeNoteDeletionExpression(checkpointKey, restore) {
+  return `
+    (function() {
+      /* backtest-trade-note-${restore ? "restore" : "commit"} */
+      var checkpoints = window.__tradingviewMcpBacktestNoteCheckpoints || {};
+      var saved = checkpoints[${JSON.stringify(checkpointKey)}];
+      if (!saved) return { success: false, error: 'Trade note undo checkpoint was not found' };
+      ${restore ? "saved.history.undoToCheckpoint(saved.checkpoint);" : ""}
+      delete checkpoints[${JSON.stringify(checkpointKey)}];
+      return { success: true, restored: ${JSON.stringify(restore)} };
+    })()
+  `;
+}
+
+function assignedTradeNoteCandidates(noteAudit = []) {
+  return noteAudit
+    .filter(
+      (assignment) =>
+        assignment.status === "assigned" &&
+        assignment.drawing_id &&
+        assignment.trade_source_id,
+    )
+    .map((assignment) => ({
+      drawing_id: String(assignment.drawing_id),
+      text: assignment.text,
+      trade_source_id: assignment.trade_source_id,
+    }));
+}
+
+function publicNoteAssignments(noteAudit = []) {
+  return noteAudit.map(({ drawing_id: _drawingId, ...assignment }) => assignment);
+}
+
+async function removeAssignedTradeNotes(candidates, deps) {
+  if (!candidates.length) return null;
+  const checkpointKey = randomUUID();
+  const result = await deps.evaluate(
+    tradeNoteDeletionExpression(candidates, checkpointKey),
+  );
+  if (!result?.success) {
+    throw new Error(result?.error || "Assigned trade notes could not be removed");
+  }
+  return { checkpointKey, candidates };
+}
+
+async function restoreAssignedTradeNotes(removal, deps) {
+  if (!removal) return { success: true, restored: false };
+  return deps.evaluate(
+    finishTradeNoteDeletionExpression(removal.checkpointKey, true),
+  );
+}
+
+async function commitAssignedTradeNoteRemoval(removal, deps) {
+  if (!removal) return { success: true };
+  return deps.evaluate(
+    finishTradeNoteDeletionExpression(removal.checkpointKey, false),
+  );
 }
 
 export const backtestExtractionExpression =
@@ -908,7 +1055,27 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
       entry_time: position.entry_time,
       reason: "The position entry candle is not loaded or could not be read",
     }));
-  const base64 = await deps.captureScreenshot(deps.evaluate);
+  const noteCandidates = assignedTradeNoteCandidates(extraction?.note_audit);
+  let noteRemoval;
+  try {
+    noteRemoval = await removeAssignedTradeNotes(noteCandidates, deps);
+  } catch (error) {
+    throw new Error(
+      `The day was not published because its assigned trade notes could not be safely removed. ${error.message}`,
+    );
+  }
+
+  let base64;
+  try {
+    base64 = await deps.captureScreenshot(deps.evaluate);
+  } catch (error) {
+    const restored = await restoreAssignedTradeNotes(noteRemoval, deps).catch(
+      () => null,
+    );
+    throw new Error(
+      `${error.message}. ${restored?.success ? "The removed trade notes were restored." : "The removed trade notes could not be restored automatically; use TradingView Undo."}`,
+    );
+  }
   const payload = {
     capture_date: captureDate,
     positions_found: inventory.length,
@@ -917,15 +1084,73 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
     daily_note: dailyNotes?.note || null,
     daily_note_drawings: dailyNotes?.count || 0,
     trade_notes_found: extraction?.note_audit?.length || 0,
-    note_assignments: extraction?.note_audit || [],
+    note_assignments: publicNoteAssignments(extraction?.note_audit),
     screenshot_context: screenshotContext,
     screenshot: { mime_type: "image/png", base64 },
   };
-  return postCapture(
-    "/ingestion/backtest/day",
-    "backtest.day",
-    payload,
-    idempotencyKey || randomUUID(),
-    deps,
+  let result;
+  try {
+    result = await postCapture(
+      "/ingestion/backtest/day",
+      "backtest.day",
+      payload,
+      idempotencyKey || randomUUID(),
+      deps,
+    );
+  } catch (error) {
+    const restored = await restoreAssignedTradeNotes(noteRemoval, deps).catch(
+      () => null,
+    );
+    throw new Error(
+      `${error.message}. ${restored?.success ? "The removed trade notes were restored." : "The removed trade notes could not be restored automatically; use TradingView Undo."}`,
+    );
+  }
+
+  const explicitlyAccepted = Array.isArray(result.accepted_trade_source_ids)
+    ? new Set(result.accepted_trade_source_ids)
+    : null;
+  const rejected = new Set(
+    (result.possible_duplicates || []).map((item) => item.source_id),
   );
+  const acceptedCandidates = noteCandidates.filter((candidate) =>
+    explicitlyAccepted
+      ? explicitlyAccepted.has(candidate.trade_source_id)
+      : !rejected.has(candidate.trade_source_id),
+  );
+  let keptRemoval = noteRemoval;
+  let cleanupWarning;
+  if (noteRemoval && acceptedCandidates.length !== noteCandidates.length) {
+    const restored = await restoreAssignedTradeNotes(noteRemoval, deps).catch(
+      () => null,
+    );
+    keptRemoval = null;
+    if (!restored?.success) {
+      cleanupWarning =
+        "Some notes for trades the server did not accept could not be restored automatically; use TradingView Undo.";
+    } else if (acceptedCandidates.length) {
+      keptRemoval = await removeAssignedTradeNotes(acceptedCandidates, deps).catch(
+        () => null,
+      );
+      if (!keptRemoval) {
+        cleanupWarning =
+          "The trades were saved, but their chart notes could not be removed after rejected notes were restored.";
+      }
+    }
+  }
+  if (keptRemoval) {
+    const committed = await commitAssignedTradeNoteRemoval(
+      keptRemoval,
+      deps,
+    ).catch(() => null);
+    if (!committed?.success) {
+      cleanupWarning =
+        cleanupWarning ||
+        "The trades were saved and the chart notes were removed, but the temporary undo checkpoint could not be cleared.";
+    }
+  }
+  return {
+    ...result,
+    trade_notes_deleted: keptRemoval ? acceptedCandidates.length : 0,
+    ...(cleanupWarning ? { trade_note_cleanup_warning: cleanupWarning } : {}),
+  };
 }

@@ -9,6 +9,8 @@ import {
   classifyLevelLabel,
   createBacktestExtractionExpression,
   enrichTradesWithStudyLabels,
+  finishTradeNoteDeletionExpression,
+  tradeNoteDeletionExpression,
 } from "../src/core/trading-sync.js";
 
 function response(body, status = 201, replayed = false) {
@@ -146,6 +148,57 @@ describe("Trading backtest batch capture sync", () => {
     });
   });
 
+  it("removes an unchanged trade note with an undo checkpoint and can restore it", () => {
+    let shapes = [{ id: "note-1", name: "text" }];
+    const note = {
+      getProperties: () => ({ text: "Retest held" }),
+    };
+    let checkpointShapes;
+    const history = {
+      createUndoCheckpoint: () => {
+        checkpointShapes = [...shapes];
+        return { id: "checkpoint" };
+      },
+      undoToCheckpoint: () => {
+        shapes = [...checkpointShapes];
+      },
+    };
+    const chart = {
+      getAllShapes: () => shapes,
+      getShapeById: () => note,
+      chartUndoModel: () => ({ undoHistory: () => history }),
+      removeEntityWithUndo: (id) => {
+        shapes = shapes.filter((shape) => shape.id !== id);
+      },
+    };
+    const window = { TradingViewApi: { activeChart: () => chart } };
+    const remove = new Function(
+      "window",
+      `return (${tradeNoteDeletionExpression(
+        [
+          {
+            drawing_id: "note-1",
+            text: "Retest held",
+            trade_source_id: "position-1",
+          },
+        ],
+        "checkpoint-key",
+      ).trim()});`,
+    );
+    assert.equal(remove(window).success, true);
+    assert.equal(shapes.length, 0);
+
+    const restore = new Function(
+      "window",
+      `return (${finishTradeNoteDeletionExpression(
+        "checkpoint-key",
+        true,
+      ).trim()});`,
+    );
+    assert.equal(restore(window).restored, true);
+    assert.equal(shapes.length, 1);
+  });
+
   it("associates a nearby text drawing with the closest position", () => {
     const entryTime = 1785591300;
     const bars = [
@@ -272,6 +325,10 @@ describe("Trading backtest batch capture sync", () => {
     );
     assert.equal(result.trades[0].notes, "");
     assert.equal(result.trades[1].notes, "");
+    assert.deepEqual(
+      result.note_audit.map((note) => note.drawing_id),
+      ["between", "far"],
+    );
   });
 
   it("classifies and attaches only supported named indicator levels", () => {
@@ -346,6 +403,7 @@ describe("Trading backtest batch capture sync", () => {
   it("reconciles only the selected day with fresh invocation keys", () =>
     withConfiguration(async () => {
       const requests = [];
+      const actions = [];
       const dayTrade = {
         ...backtestTrade,
         source_id: "/chart/test-layout/::position-1",
@@ -376,10 +434,19 @@ describe("Trading backtest batch capture sync", () => {
               visible_to: "2026-08-01",
             };
           }
+          if (expression.includes("backtest-trade-note-delete")) {
+            actions.push("delete");
+            return { success: true, removed_ids: ["note-1"] };
+          }
+          if (expression.includes("backtest-trade-note-commit")) {
+            actions.push("commit");
+            return { success: true, restored: false };
+          }
           return {
             trades: [dayTrade, { ...dayTrade, chart_date: "2026-07-31" }],
             note_audit: [
               {
+                drawing_id: "note-1",
                 source_id: "/chart/test-layout/::note-1",
                 text: "Retest held",
                 status: "assigned",
@@ -389,19 +456,24 @@ describe("Trading backtest batch capture sync", () => {
             ],
           };
         },
-        captureScreenshot: async () => "cG5n",
+        captureScreenshot: async () => {
+          actions.push("screenshot");
+          return "cG5n";
+        },
         getPineLabels: async () => ({ success: true, studies: [] }),
         fetch: async (url, options) => {
+          actions.push("publish");
           requests.push({ url, options });
           return response({
             capture_date: "2026-08-01",
             summary: { inserted: 1, updated: 0, unchanged: 0, skipped: 1 },
+            accepted_trade_source_ids: [dayTrade.source_id],
             records: [{ id: 1 }],
           });
         },
       };
 
-      await captureBacktestDay({ _deps: deps });
+      const firstResult = await captureBacktestDay({ _deps: deps });
       await captureBacktestDay({ _deps: deps });
 
       const body = JSON.parse(requests[0].options.body);
@@ -414,11 +486,83 @@ describe("Trading backtest batch capture sync", () => {
       assert.equal(body.daily_note, "Waited for the opening range.");
       assert.equal(body.skipped.length, 1);
       assert.equal(body.trade_notes_found, 1);
+      assert.equal("drawing_id" in body.note_assignments[0], false);
       assert.equal(body.screenshot_context.date_visible, true);
+      assert.equal(firstResult.trade_notes_deleted, 1);
+      assert.deepEqual(actions.slice(0, 4), [
+        "delete",
+        "screenshot",
+        "publish",
+        "commit",
+      ]);
       assert.notEqual(
         requests[0].options.headers["Idempotency-Key"],
         requests[1].options.headers["Idempotency-Key"],
       );
+    }));
+
+  it("restores assigned chart notes when publishing fails", () =>
+    withConfiguration(async () => {
+      const actions = [];
+      const dayTrade = {
+        ...backtestTrade,
+        source_id: "/chart/test-layout/::position-1",
+        notes: "Retest held",
+      };
+      await assert.rejects(
+        captureBacktestDay({
+          date: "2026-08-01",
+          _deps: {
+            evaluate: async (expression) => {
+              if (expression.includes("backtest-day-inventory")) {
+                return [{ source_id: dayTrade.source_id, entry_time: 1785591300 }];
+              }
+              if (expression.includes("backtest-day-notes")) {
+                return { count: 1, note: "Daily plan" };
+              }
+              if (expression.includes("getVisibleRange")) {
+                return {
+                  date_visible: true,
+                  visible_from: "2026-08-01",
+                  visible_to: "2026-08-01",
+                };
+              }
+              if (expression.includes("backtest-trade-note-delete")) {
+                actions.push("delete");
+                return { success: true, removed_ids: ["note-1"] };
+              }
+              if (expression.includes("backtest-trade-note-restore")) {
+                actions.push("restore");
+                return { success: true, restored: true };
+              }
+              return {
+                trades: [dayTrade],
+                note_audit: [
+                  {
+                    drawing_id: "note-1",
+                    source_id: "/chart/test-layout/::note-1",
+                    text: "Retest held",
+                    status: "assigned",
+                    trade_source_id: dayTrade.source_id,
+                    candidate_source_ids: [dayTrade.source_id],
+                  },
+                ],
+              };
+            },
+            captureScreenshot: async () => {
+              actions.push("screenshot");
+              return "cG5n";
+            },
+            getPineLabels: async () => ({ success: true, studies: [] }),
+            fetch: async () => {
+              actions.push("publish");
+              return response({ message: "Backend rejected capture" }, 400);
+            },
+          },
+        }),
+        /removed trade notes were restored/,
+      );
+      assert.deepEqual(actions, ["delete", "screenshot", "publish", "restore"]);
     }));
 
   it("refuses a day capture when that date is not visible for the screenshot", () =>
