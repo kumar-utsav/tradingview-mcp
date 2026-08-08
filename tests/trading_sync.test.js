@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   activeChartBoundsExpression,
   backtestExtractionExpression,
+  beginPositionIsolationExpression,
   captureBacktestBatch,
   captureBacktestDay,
   captureJournal,
@@ -10,6 +11,8 @@ import {
   createBacktestExtractionExpression,
   enrichTradesWithStudyLabels,
   finishTradeNoteDeletionExpression,
+  restorePositionIsolationExpression,
+  showOnlyPositionExpression,
   tradeNoteDeletionExpression,
 } from "../src/core/trading-sync.js";
 
@@ -151,7 +154,7 @@ describe("Trading backtest batch capture sync", () => {
   it("removes an unchanged trade note with an undo checkpoint and can restore it", () => {
     let shapes = [{ id: "note-1", name: "text" }];
     const note = {
-      getProperties: () => ({ text: "Retest held" }),
+      getProperties: () => ({ text: "1: Retest held" }),
     };
     let checkpointShapes;
     const history = {
@@ -197,6 +200,183 @@ describe("Trading backtest batch capture sync", () => {
     );
     assert.equal(restore(window).restored, true);
     assert.equal(shapes.length, 1);
+  });
+
+  it("isolates one position for a screenshot and restores original visibility", async () => {
+    const visibility = new Map([
+      ["one", true],
+      ["two", true],
+      ["already-hidden", false],
+    ]);
+    const shapes = [
+      { id: "one", name: "long_position" },
+      { id: "two", name: "short_position" },
+      { id: "already-hidden", name: "long_position" },
+    ];
+    const shapeById = Object.fromEntries(
+      shapes.map((meta) => [
+        meta.id,
+        {
+          getProperties: () => ({ visible: visibility.get(meta.id) }),
+          setProperties: ({ visible }) => visibility.set(meta.id, visible),
+        },
+      ]),
+    );
+    const window = {
+      requestAnimationFrame: (callback) => callback(),
+      TradingViewApi: {
+        activeChart: () => ({
+          getAllShapes: () => shapes,
+          getShapeById: (id) => shapeById[id],
+        }),
+      },
+    };
+    const begin = new Function(
+      "window",
+      "return (" + beginPositionIsolationExpression("session").trim() + ");",
+    );
+    const showOnly = new Function(
+      "window",
+      "return (" +
+        showOnlyPositionExpression("session", "two").trim() +
+        ");",
+    );
+    const restore = new Function(
+      "window",
+      "return (" +
+        restorePositionIsolationExpression("session").trim() +
+        ");",
+    );
+
+    assert.equal(begin(window).success, true);
+    assert.equal((await showOnly(window)).success, true);
+    assert.deepEqual(Object.fromEntries(visibility), {
+      one: false,
+      two: true,
+      "already-hidden": false,
+    });
+    assert.equal((await restore(window)).success, true);
+    assert.deepEqual(Object.fromEntries(visibility), {
+      one: true,
+      two: true,
+      "already-hidden": false,
+    });
+  });
+
+  it("matches numbered notes to trades from earliest to latest and strips the prefix", () => {
+    const firstEntry = 1785591300;
+    const secondEntry = firstEntry + 240;
+    const bars = [
+      { value: [firstEntry, 629, 631, 628, 630] },
+      { value: [secondEntry, 630, 632, 629, 631] },
+      { value: [secondEntry + 60, 631, 633, 630, 632] },
+    ];
+    const shapes = [
+      { id: "later", name: "short_position" },
+      { id: "note-two", name: "text" },
+      { id: "earlier", name: "short_position" },
+      { id: "note-one", name: "text" },
+    ];
+    const shapeById = {
+      earlier: {
+        getProperties: () => ({ profitLevel: 100, stopLevel: 50 }),
+        getPoints: () => [{ time: firstEntry, price: 630 }],
+      },
+      later: {
+        getProperties: () => ({ profitLevel: 200, stopLevel: 100 }),
+        getPoints: () => [{ time: secondEntry, price: 631 }],
+      },
+      "note-one": {
+        getProperties: () => ({ text: "1: First trade reasoning" }),
+        getPoints: () => [{ time: firstEntry + 1800, price: 600 }],
+      },
+      "note-two": {
+        getProperties: () => ({ text: "2: Second trade reasoning" }),
+        getPoints: () => [{ time: firstEntry + 60, price: 700 }],
+      },
+    };
+    const chart = {
+      getSeries: () => ({ data: () => ({ bars: () => ({ _items: bars }) }) }),
+      symbolExt: () => ({ symbol: "SPY" }),
+      resolution: () => "1",
+      getAllShapes: () => shapes,
+      getShapeById: (id) => shapeById[id],
+    };
+    const run = new Function(
+      "window",
+      "return (" +
+        createBacktestExtractionExpression(null, "2026-08-01", true).trim() +
+        ");",
+    );
+    const result = run({
+      location: { pathname: "/chart/layout/" },
+      TradingViewApi: { activeChart: () => chart },
+    });
+    assert.deepEqual(
+      result.trades.map((trade) => [trade.source_id, trade.notes]),
+      [
+        ["/chart/layout/::earlier", "First trade reasoning"],
+        ["/chart/layout/::later", "Second trade reasoning"],
+      ],
+    );
+    assert.deepEqual(
+      result.note_audit.map((note) => [note.status, note.trade_source_id]),
+      [
+        ["assigned", "/chart/layout/::later"],
+        ["assigned", "/chart/layout/::earlier"],
+      ],
+    );
+  });
+
+  it("leaves duplicate and out-of-range numbered notes unresolved", () => {
+    const entryTime = 1785591300;
+    const bars = [{ value: [entryTime, 629, 631, 628, 630] }];
+    const shapes = [
+      { id: "position", name: "long_position" },
+      { id: "duplicate-a", name: "text" },
+      { id: "duplicate-b", name: "text" },
+      { id: "out-of-range", name: "text" },
+    ];
+    const shapeById = {
+      position: {
+        getProperties: () => ({ profitLevel: 100, stopLevel: 100 }),
+        getPoints: () => [{ time: entryTime, price: 630 }],
+      },
+      "duplicate-a": {
+        getProperties: () => ({ text: "1: First version" }),
+        getPoints: () => [{ time: entryTime, price: 630 }],
+      },
+      "duplicate-b": {
+        getProperties: () => ({ text: "1: Second version" }),
+        getPoints: () => [{ time: entryTime, price: 630 }],
+      },
+      "out-of-range": {
+        getProperties: () => ({ text: "3: Missing trade" }),
+        getPoints: () => [{ time: entryTime, price: 630 }],
+      },
+    };
+    const chart = {
+      getSeries: () => ({ data: () => ({ bars: () => ({ _items: bars }) }) }),
+      symbolExt: () => ({ symbol: "SPY" }),
+      resolution: () => "1",
+      getAllShapes: () => shapes,
+      getShapeById: (id) => shapeById[id],
+    };
+    const run = new Function(
+      "window",
+      "return (" +
+        createBacktestExtractionExpression(null, "2026-08-01", true).trim() +
+        ");",
+    );
+    const result = run({
+      location: { pathname: "/chart/layout/" },
+      TradingViewApi: { activeChart: () => chart },
+    });
+    assert.equal(result.trades[0].notes, "");
+    assert.deepEqual(
+      result.note_audit.map((note) => note.status),
+      ["ambiguous", "ambiguous", "unassigned"],
+    );
   });
 
   it("associates a nearby text drawing with the closest position", () => {
@@ -411,14 +591,27 @@ describe("Trading backtest batch capture sync", () => {
       };
       const deps = {
         evaluateAsync: async (expression) => {
-          assert.match(expression, /requestSelectBar/);
-          return "2026-08-01";
+          if (expression.includes("requestSelectBar")) return "2026-08-01";
+          if (expression.includes("backtest-position-isolation-show")) {
+            actions.push("isolate");
+            return { success: true, visible_drawing_id: "position-1" };
+          }
+          if (expression.includes("backtest-position-isolation-restore")) {
+            actions.push("restore-positions");
+            return { success: true, restored: 2 };
+          }
+          throw new Error("Unexpected async expression");
         },
         evaluate: async (expression) => {
           if (expression.includes("backtest-day-inventory")) {
             return [
-              { source_id: dayTrade.source_id, entry_time: 1785591300 },
               {
+                drawing_id: "position-1",
+                source_id: dayTrade.source_id,
+                entry_time: 1785591300,
+              },
+              {
+                drawing_id: "position-2",
                 source_id: "/chart/test-layout/::position-2",
                 entry_time: 1785591360,
               },
@@ -441,6 +634,10 @@ describe("Trading backtest batch capture sync", () => {
           if (expression.includes("backtest-trade-note-commit")) {
             actions.push("commit");
             return { success: true, restored: false };
+          }
+          if (expression.includes("backtest-position-isolation-begin")) {
+            actions.push("begin-isolation");
+            return { success: true, positions: 2 };
           }
           return {
             trades: [dayTrade, { ...dayTrade, chart_date: "2026-07-31" }],
@@ -486,12 +683,18 @@ describe("Trading backtest batch capture sync", () => {
       assert.equal(body.daily_note, "Waited for the opening range.");
       assert.equal(body.skipped.length, 1);
       assert.equal(body.trade_notes_found, 1);
+      assert.equal(body.trade_screenshots.length, 1);
+      assert.equal(body.trade_screenshots[0].source_id, dayTrade.source_id);
       assert.equal("drawing_id" in body.note_assignments[0], false);
       assert.equal(body.screenshot_context.date_visible, true);
       assert.equal(firstResult.trade_notes_deleted, 1);
-      assert.deepEqual(actions.slice(0, 4), [
+      assert.deepEqual(actions.slice(0, 8), [
         "delete",
         "screenshot",
+        "begin-isolation",
+        "isolate",
+        "screenshot",
+        "restore-positions",
         "publish",
         "commit",
       ]);
@@ -515,7 +718,13 @@ describe("Trading backtest batch capture sync", () => {
           _deps: {
             evaluate: async (expression) => {
               if (expression.includes("backtest-day-inventory")) {
-                return [{ source_id: dayTrade.source_id, entry_time: 1785591300 }];
+                return [
+                  {
+                    drawing_id: "position-1",
+                    source_id: dayTrade.source_id,
+                    entry_time: 1785591300,
+                  },
+                ];
               }
               if (expression.includes("backtest-day-notes")) {
                 return { count: 1, note: "Daily plan" };
@@ -535,6 +744,10 @@ describe("Trading backtest batch capture sync", () => {
                 actions.push("restore");
                 return { success: true, restored: true };
               }
+              if (expression.includes("backtest-position-isolation-begin")) {
+                actions.push("begin-isolation");
+                return { success: true, positions: 1 };
+              }
               return {
                 trades: [dayTrade],
                 note_audit: [
@@ -549,6 +762,17 @@ describe("Trading backtest batch capture sync", () => {
                 ],
               };
             },
+            evaluateAsync: async (expression) => {
+              if (expression.includes("backtest-position-isolation-show")) {
+                actions.push("isolate");
+                return { success: true, visible_drawing_id: "position-1" };
+              }
+              if (expression.includes("backtest-position-isolation-restore")) {
+                actions.push("restore-positions");
+                return { success: true, restored: 1 };
+              }
+              throw new Error("Unexpected async expression");
+            },
             captureScreenshot: async () => {
               actions.push("screenshot");
               return "cG5n";
@@ -562,7 +786,16 @@ describe("Trading backtest batch capture sync", () => {
         }),
         /removed trade notes were restored/,
       );
-      assert.deepEqual(actions, ["delete", "screenshot", "publish", "restore"]);
+      assert.deepEqual(actions, [
+        "delete",
+        "screenshot",
+        "begin-isolation",
+        "isolate",
+        "screenshot",
+        "restore-positions",
+        "publish",
+        "restore",
+      ]);
     }));
 
   it("refuses a day capture when that date is not visible for the screenshot", () =>

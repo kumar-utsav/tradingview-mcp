@@ -436,6 +436,14 @@ export function createBacktestExtractionExpression(
       }
       return '';
     }
+    function numberedTradeNote(text) {
+      var match = String(text || '').match(
+        /^#?([1-9]\\d{0,2})\\s*[:.)-]\\s+([\\s\\S]+)$/
+      );
+      if (!match) return null;
+      var value = match[2].trim();
+      return value ? { ordinal: Number(match[1]), text: value } : null;
+    }
     function outcome(startIndex, entryPrice, profit, stop, isLong) {
       if (profit == null || stop == null || entryPrice == null || startIndex < 0) {
         return { outcome: 'Needs Review', exit_candle: null, duration_minutes: null };
@@ -587,6 +595,10 @@ export function createBacktestExtractionExpression(
         }
       } catch (error) {}
     }
+    trades.sort(function(left, right) {
+      return left._entry_time - right._entry_time
+        || left.source_id.localeCompare(right.source_id);
+    });
     var notes = [];
     for (var noteIndex = 0; noteIndex < allShapes.length; noteIndex++) {
       var noteMeta = allShapes[noteIndex];
@@ -598,7 +610,9 @@ export function createBacktestExtractionExpression(
         var noteProperties = noteShape.getProperties ? noteShape.getProperties() : {};
         var rawText = noteText(noteShape, noteProperties);
         if (!rawText || /^DAY\\s*:/i.test(rawText)) continue;
-        var text = rawText.replace(/^TRADE\\s*:\\s*/i, '').trim();
+        var tradeText = rawText.replace(/^TRADE\\s*:\\s*/i, '').trim();
+        var numbered = numberedTradeNote(tradeText);
+        var text = numbered ? numbered.text : tradeText;
         if (!text) continue;
         var notePoints = noteShape.getPoints ? noteShape.getPoints() : [];
         if (!notePoints.length || notePoints[0].time == null) continue;
@@ -608,6 +622,7 @@ export function createBacktestExtractionExpression(
           drawing_id: String(noteMeta.id),
           source_id: chartSource + '::' + String(noteMeta.id),
           text: text,
+          ordinal: numbered ? numbered.ordinal : null,
           time: Number(notePoints[0].time),
           date: noteDate,
           price: notePoints[0].price == null ? null : Number(notePoints[0].price)
@@ -615,16 +630,59 @@ export function createBacktestExtractionExpression(
       } catch (error) {}
     }
     notes.sort(function(left, right) {
-      return left.time - right.time || (left.price || 0) - (right.price || 0);
+      var numberedPriority = Number(left.ordinal == null)
+        - Number(right.ordinal == null);
+      return numberedPriority
+        || left.time - right.time
+        || (left.price || 0) - (right.price || 0);
     });
     var secondsPerBar = Math.max(
       60,
       Number.isFinite(timeFrame) ? timeFrame * 60 : 60
     );
     var noteAudit = [];
+    var ordinalCounts = new Map();
+    for (var countIndex = 0; countIndex < notes.length; countIndex++) {
+      if (notes[countIndex].ordinal == null) continue;
+      ordinalCounts.set(
+        notes[countIndex].ordinal,
+        (ordinalCounts.get(notes[countIndex].ordinal) || 0) + 1
+      );
+    }
+    var numberedTradeIndexes = new Set();
     for (var n = 0; n < notes.length; n++) {
+      if (notes[n].ordinal != null) {
+        var numberedIndex = notes[n].ordinal - 1;
+        var numberedTrade = trades[numberedIndex];
+        var duplicateNumber = ordinalCounts.get(notes[n].ordinal) > 1;
+        if (numberedTrade && !duplicateNumber) {
+          numberedTrade.notes = numberedTrade.notes
+            ? numberedTrade.notes + '\\n\\n' + notes[n].text
+            : notes[n].text;
+          numberedTradeIndexes.add(numberedIndex);
+          noteAudit.push({
+            drawing_id: notes[n].drawing_id,
+            source_id: notes[n].source_id,
+            text: notes[n].text,
+            status: 'assigned',
+            trade_source_id: numberedTrade.source_id,
+            candidate_source_ids: [numberedTrade.source_id]
+          });
+        } else {
+          noteAudit.push({
+            drawing_id: notes[n].drawing_id,
+            source_id: notes[n].source_id,
+            text: notes[n].text,
+            status: duplicateNumber ? 'ambiguous' : 'unassigned',
+            trade_source_id: null,
+            candidate_source_ids: numberedTrade ? [numberedTrade.source_id] : []
+          });
+        }
+        continue;
+      }
       var candidates = [];
       for (var tradeIndex = 0; tradeIndex < trades.length; tradeIndex++) {
+        if (numberedTradeIndexes.has(tradeIndex)) continue;
         var candidate = trades[tradeIndex];
         if (notes[n].date !== candidate._entry_date) continue;
         var timeDistance = Math.abs(notes[n].time - candidate._entry_time);
@@ -703,7 +761,13 @@ export function tradeNoteDeletionExpression(candidates, checkpointKey) {
         }
         for (var index = 0; index < values.length; index++) {
           var text = textValue(values[index]);
-          if (text) return text.replace(/^TRADE\\s*:\\s*/i, '').trim();
+          if (text) {
+            var normalized = text.replace(/^TRADE\\s*:\\s*/i, '').trim();
+            var numbered = normalized.match(
+              /^#?([1-9]\\d{0,2})\\s*[:.)-]\\s+([\\s\\S]+)$/
+            );
+            return numbered ? numbered[2].trim() : normalized;
+          }
         }
         return '';
       }
@@ -852,6 +916,7 @@ function dayPositionInventoryExpression(targetDate) {
           if (!points.length || points[0].time == null) continue;
           if (dateOf(points[0].time) !== ${JSON.stringify(targetDate)}) continue;
           result.push({
+            drawing_id: String(meta.id),
             source_id: chartSource + '::' + String(meta.id),
             entry_time: Number(points[0].time)
           });
@@ -1018,6 +1083,183 @@ export async function captureBacktestBatch({ idempotencyKey, _deps } = {}) {
   );
 }
 
+export function beginPositionIsolationExpression(sessionKey) {
+  return `
+    (function() {
+      /* backtest-position-isolation-begin */
+      var chart = window.TradingViewApi.activeChart
+        ? window.TradingViewApi.activeChart()
+        : ${CHART_API};
+      if (!chart) return { success: false, error: 'No active chart found' };
+      var sessions = window.__tradingviewMcpPositionIsolation
+        || (window.__tradingviewMcpPositionIsolation = {});
+      var key = ${JSON.stringify(sessionKey)};
+      if (sessions[key]) {
+        return { success: false, error: 'Position isolation session already exists' };
+      }
+      function propertyBoolean(value, fallback) {
+        if (value && typeof value.value === 'function') {
+          try { return Boolean(value.value()); } catch (error) {}
+        }
+        return value == null ? fallback : Boolean(value);
+      }
+      var states = [];
+      var shapes = chart.getAllShapes() || [];
+      for (var index = 0; index < shapes.length; index++) {
+        var meta = shapes[index];
+        if (meta.name !== 'long_position' && meta.name !== 'short_position') continue;
+        var shape = chart.getShapeById(meta.id);
+        if (!shape || typeof shape.setProperties !== 'function') {
+          return {
+            success: false,
+            error: 'A position drawing cannot be temporarily hidden: ' + String(meta.id)
+          };
+        }
+        var properties = shape.getProperties ? shape.getProperties() : {};
+        states.push({
+          id: String(meta.id),
+          visible: propertyBoolean(properties.visible, true)
+        });
+      }
+      sessions[key] = { chart: chart, states: states };
+      return { success: true, positions: states.length };
+    })()
+  `;
+}
+
+export function showOnlyPositionExpression(sessionKey, targetDrawingId) {
+  return `
+    (async function() {
+      /* backtest-position-isolation-show */
+      var sessions = window.__tradingviewMcpPositionIsolation || {};
+      var saved = sessions[${JSON.stringify(sessionKey)}];
+      if (!saved) return { success: false, error: 'Position isolation session was not found' };
+      var target = ${JSON.stringify(String(targetDrawingId))};
+      if (!saved.states.some(function(state) { return state.id === target; })) {
+        return { success: false, error: 'Target position drawing was not found: ' + target };
+      }
+      for (var index = 0; index < saved.states.length; index++) {
+        var state = saved.states[index];
+        var shape = saved.chart.getShapeById(state.id);
+        if (!shape) return { success: false, error: 'Position drawing disappeared: ' + state.id };
+        shape.setProperties({ visible: state.id === target }, false);
+      }
+      await new Promise(function(resolve) {
+        var finished = false;
+        function finish() {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeout);
+          resolve();
+        }
+        var timeout = setTimeout(finish, 250);
+        if (typeof window.requestAnimationFrame !== 'function') return;
+        window.requestAnimationFrame(function() {
+          window.requestAnimationFrame(finish);
+        });
+      });
+      return { success: true, visible_drawing_id: target };
+    })()
+  `;
+}
+
+export function restorePositionIsolationExpression(sessionKey) {
+  return `
+    (async function() {
+      /* backtest-position-isolation-restore */
+      var sessions = window.__tradingviewMcpPositionIsolation || {};
+      var key = ${JSON.stringify(sessionKey)};
+      var saved = sessions[key];
+      if (!saved) return { success: false, error: 'Position isolation session was not found' };
+      var missing = [];
+      for (var index = 0; index < saved.states.length; index++) {
+        var state = saved.states[index];
+        var shape = saved.chart.getShapeById(state.id);
+        if (!shape) {
+          missing.push(state.id);
+          continue;
+        }
+        shape.setProperties({ visible: state.visible }, false);
+      }
+      await new Promise(function(resolve) {
+        var finished = false;
+        function finish() {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeout);
+          resolve();
+        }
+        var timeout = setTimeout(finish, 250);
+        if (typeof window.requestAnimationFrame !== 'function') return;
+        window.requestAnimationFrame(function() {
+          window.requestAnimationFrame(finish);
+        });
+      });
+      delete sessions[key];
+      return missing.length
+        ? { success: false, error: 'Some position drawings could not be restored', missing: missing }
+        : { success: true, restored: saved.states.length };
+    })()
+  `;
+}
+
+async function captureIsolatedTradeScreenshots(trades, inventory, deps) {
+  if (!trades.length) return [];
+  const drawingIds = new Map(
+    inventory.map((position) => [position.source_id, position.drawing_id]),
+  );
+  const targets = trades.map((trade) => ({
+    source_id: trade.source_id,
+    drawing_id: drawingIds.get(trade.source_id),
+  }));
+  const missing = targets.filter((target) => !target.drawing_id);
+  if (missing.length) {
+    throw new Error(
+      `Position drawing IDs were unavailable for ${missing.length} trade${missing.length === 1 ? "" : "s"}`,
+    );
+  }
+
+  const sessionKey = randomUUID();
+  const started = await deps.evaluate(
+    beginPositionIsolationExpression(sessionKey),
+  );
+  if (!started?.success) {
+    throw new Error(started?.error || "Position isolation could not start");
+  }
+
+  const screenshots = [];
+  let captureError;
+  try {
+    for (const target of targets) {
+      const isolated = await deps.evaluateAsync(
+        showOnlyPositionExpression(sessionKey, target.drawing_id),
+      );
+      if (!isolated?.success) {
+        throw new Error(isolated?.error || "A trade position could not be isolated");
+      }
+      const base64 = await deps.captureScreenshot(deps.evaluate);
+      screenshots.push({
+        source_id: target.source_id,
+        screenshot: { mime_type: "image/png", base64 },
+      });
+    }
+  } catch (error) {
+    captureError = error;
+  }
+
+  const restored = await deps
+    .evaluateAsync(restorePositionIsolationExpression(sessionKey))
+    .catch(() => null);
+  if (!restored?.success) {
+    const failurePrefix = captureError ? `${captureError.message}. ` : "";
+    throw new Error(
+      `${failurePrefix}TradingView position visibility could not be fully restored. Show all Long/Short tools manually before retrying.`,
+    );
+  }
+  if (captureError) throw captureError;
+  return screenshots;
+}
+
 export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
   const deps = dependencies(_deps);
   const captureDate =
@@ -1066,8 +1308,14 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
   }
 
   let base64;
+  let tradeScreenshots;
   try {
     base64 = await deps.captureScreenshot(deps.evaluate);
+    tradeScreenshots = await captureIsolatedTradeScreenshots(
+      trades,
+      inventory,
+      deps,
+    );
   } catch (error) {
     const restored = await restoreAssignedTradeNotes(noteRemoval, deps).catch(
       () => null,
@@ -1087,6 +1335,7 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
     note_assignments: publicNoteAssignments(extraction?.note_audit),
     screenshot_context: screenshotContext,
     screenshot: { mime_type: "image/png", base64 },
+    trade_screenshots: tradeScreenshots,
   };
   let result;
   try {
