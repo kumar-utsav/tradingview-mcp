@@ -72,7 +72,7 @@ export function registerTradingSyncTools(server) {
   );
   server.tool(
     "capture_backtest_day",
-    "Reconcile one visible TradingView day, using DAY: for the daily thought and all untagged text as audited trade notes; report stored changes, review items, and likely redrawn duplicates",
+    "Reconcile one visible TradingView day, using DAY: for the daily thought and all untagged text as audited trade notes; safely remove each assigned trade note before the clean chart snapshot and publish, while retaining unresolved notes",
     dayInput,
     async ({ date, idempotency_key }) => {
       try {
