@@ -100,18 +100,43 @@ function fingerprint(operation, payload) {
     .digest("hex");
 }
 
-async function captureChartScreenshot(evaluate = defaultEvaluate) {
-  const client = await getClient();
-  const bounds = await evaluate(`
-    (function() {
-      var el = document.querySelector('[data-name="pane-canvas"]')
+export const activeChartBoundsExpression = `
+  (function() {
+    var api = window.TradingViewApi;
+    var collection = api && api._chartWidgetCollection;
+    var active = api && api._activeChartWidgetWV
+      ? api._activeChartWidgetWV.value() : null;
+    var charts = collection && collection.getAll ? collection.getAll() : [];
+    var activeIndex = -1;
+    for (var index = 0; index < charts.length; index++) {
+      if (active && active._chartWidget && charts[index] === active._chartWidget) {
+        activeIndex = index;
+        break;
+      }
+    }
+    var el = activeIndex >= 0
+      ? document.querySelector('[aria-label="Chart #' + (activeIndex + 1) + '"]')
+      : null;
+    if (!el) {
+      el = document.querySelector('[data-name="pane-canvas"]')
         || document.querySelector('[class*="chart-container"]')
         || document.querySelector('canvas');
-      if (!el) return null;
-      var rect = el.getBoundingClientRect();
-      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-    })()
-  `);
+    }
+    if (!el) return null;
+    var rect = el.getBoundingClientRect();
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      active_index: activeIndex
+    };
+  })()
+`;
+
+async function captureChartScreenshot(evaluate = defaultEvaluate) {
+  const client = await getClient();
+  const bounds = await evaluate(activeChartBoundsExpression);
   const params = { format: "png" };
   if (bounds && bounds.width > 0 && bounds.height > 0) {
     params.clip = { ...bounds, scale: 1 };
