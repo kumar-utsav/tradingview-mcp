@@ -577,11 +577,13 @@ export function createBacktestExtractionExpression(
         if (!text) continue;
         var notePoints = noteShape.getPoints ? noteShape.getPoints() : [];
         if (!notePoints.length || notePoints[0].time == null) continue;
+        var noteDate = timeData(Number(notePoints[0].time) * 1000).date;
+        if (targetDate && noteDate !== targetDate) continue;
         notes.push({
           source_id: chartSource + '::' + String(noteMeta.id),
           text: text,
           time: Number(notePoints[0].time),
-          date: timeData(Number(notePoints[0].time) * 1000).date,
+          date: noteDate,
           price: notePoints[0].price == null ? null : Number(notePoints[0].price)
         });
       } catch (error) {}

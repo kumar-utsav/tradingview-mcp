@@ -185,6 +185,7 @@ describe("Trading backtest batch capture sync", () => {
       { id: "two", name: "long_position" },
       { id: "between", name: "text" },
       { id: "far", name: "text" },
+      { id: "prior-day", name: "text" },
     ];
     const positions = {
       one: {
@@ -203,6 +204,10 @@ describe("Trading backtest batch capture sync", () => {
         getProperties: () => ({ text: "Tomorrow's idea" }),
         getPoints: () => [{ time: entryTime + 10000, price: 630 }],
       },
+      "prior-day": {
+        getProperties: () => ({ text: "Prior session note" }),
+        getPoints: () => [{ time: entryTime - 86400, price: 630 }],
+      },
     };
     const chart = {
       getSeries: () => ({ data: () => ({ bars: () => ({ _items: bars }) }) }),
@@ -213,7 +218,7 @@ describe("Trading backtest batch capture sync", () => {
     };
     const run = new Function(
       "window",
-      `return (${createBacktestExtractionExpression(null, null, true).trim()});`,
+      `return (${createBacktestExtractionExpression(null, "2026-08-01", true).trim()});`,
     );
     const result = run({
       location: { pathname: "/chart/layout/" },
