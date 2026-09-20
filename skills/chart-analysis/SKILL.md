@@ -40,6 +40,11 @@ Use drawing tools to mark up the chart:
 - `draw_shape` with `trend_line` for trend channels (needs two points)
 - `draw_shape` with `text` for annotations
 
+For requests that ask the AI to identify and draw key levels or profit-taking
+targets on any symbol or timeframe, follow the dedicated
+[`key-levels`](../key-levels/SKILL.md) workflow instead of this generic
+annotation guidance.
+
 ## Step 5: Capture and Analyze
 
 1. `capture_screenshot` — screenshot the annotated chart

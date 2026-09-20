@@ -8,6 +8,9 @@ import { getPineLabels } from "./data.js";
 
 const CHART_API = "window.TradingViewApi._activeChartWidgetWV.value()";
 const MAX_TRADES_BATCH = 1000;
+const TRADE_WITH_NETO_SEARCH_URL =
+  "https://www.youtube.com/@TradeWithNeto/search";
+const TRADE_WITH_NETO_RESOURCE_TITLE = "Trade with Neto";
 
 const LEVEL_TAG_PATTERNS = [
   [/^PWH\b/i, "bt_confluence_prior_week_high"],
@@ -79,7 +82,127 @@ function dependencies(overrides = {}) {
     evaluateAsync: overrides.evaluateAsync || defaultEvaluateAsync,
     captureScreenshot: overrides.captureScreenshot || captureChartScreenshot,
     fetch: overrides.fetch || globalThis.fetch,
+    resourceFetch: overrides.resourceFetch || globalThis.fetch,
     getPineLabels: overrides.getPineLabels || getPineLabels,
+  };
+}
+
+function youtubeTitleDate(chartDate) {
+  const match = String(chartDate || "").match(
+    /^\d{2}(\d{2})-(\d{2})-(\d{2})$/,
+  );
+  return match ? `${match[1]}${match[2]}${match[3]}` : null;
+}
+
+function parseJsonObjectAfterMarker(html, marker) {
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const start = html.indexOf("{", markerIndex + marker.length);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < html.length; index += 1) {
+    const character = html[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    if (character === "}") depth -= 1;
+    if (depth === 0) return JSON.parse(html.slice(start, index + 1));
+  }
+  return null;
+}
+
+function youtubeInitialData(html) {
+  const markers = [
+    "var ytInitialData = ",
+    'window["ytInitialData"] = ',
+    "ytInitialData = ",
+  ];
+  for (const marker of markers) {
+    try {
+      const parsed = parseJsonObjectAfterMarker(html, marker);
+      if (parsed) return parsed;
+    } catch {
+      // Try the next supported assignment form.
+    }
+  }
+  return null;
+}
+
+function rendererTitle(renderer) {
+  if (renderer?.title?.simpleText) return renderer.title.simpleText.trim();
+  return (renderer?.title?.runs || [])
+    .map((run) => run?.text || "")
+    .join("")
+    .trim();
+}
+
+export function extractTradeWithNetoVideo(html, chartDate) {
+  const titleDate = youtubeTitleDate(chartDate);
+  const initialData = youtubeInitialData(String(html || ""));
+  if (!titleDate || !initialData) return null;
+  const renderers = [];
+  const pending = [initialData];
+  while (pending.length) {
+    const value = pending.pop();
+    if (!value || typeof value !== "object") continue;
+    if (value.videoRenderer) renderers.push(value.videoRenderer);
+    if (value.gridVideoRenderer) renderers.push(value.gridVideoRenderer);
+    for (const child of Object.values(value)) {
+      if (child && typeof child === "object") pending.push(child);
+    }
+  }
+  const match = renderers.find((renderer) => {
+    const title = rendererTitle(renderer);
+    return renderer?.videoId && new RegExp(`^${titleDate}(?:\\s|$)`).test(title);
+  });
+  if (!match) return null;
+  return {
+    title: rendererTitle(match),
+    video_id: match.videoId,
+    url: `https://www.youtube.com/watch?v=${match.videoId}`,
+  };
+}
+
+export async function findTradeWithNetoResource(
+  chartDate,
+  { fetch: fetchResource = globalThis.fetch } = {},
+) {
+  const titleDate = youtubeTitleDate(chartDate);
+  if (!titleDate) throw new Error("A valid chart date is required");
+  const url = `${TRADE_WITH_NETO_SEARCH_URL}?query=${titleDate}`;
+  const response = await fetchResource(url, {
+    headers: {
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36",
+    },
+    signal: globalThis.AbortSignal.timeout(10000),
+  });
+  if (!response.ok) {
+    throw new Error(`YouTube lookup failed with HTTP ${response.status}`);
+  }
+  const video = extractTradeWithNetoVideo(await response.text(), chartDate);
+  if (!video) {
+    return { status: "not_found", chart_date: chartDate, title_date: titleDate };
+  }
+  return {
+    status: "found",
+    chart_date: chartDate,
+    video_title: video.title,
+    resource: {
+      title: TRADE_WITH_NETO_RESOURCE_TITLE,
+      url: video.url,
+    },
   };
 }
 
@@ -1279,6 +1402,18 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
       `The selected date ${captureDate} is not visible in the active chart. Scroll to that day and retry.`,
     );
   }
+  let resourceLookup;
+  try {
+    resourceLookup = await findTradeWithNetoResource(captureDate, {
+      fetch: deps.resourceFetch,
+    });
+  } catch (error) {
+    resourceLookup = {
+      status: "unavailable",
+      chart_date: captureDate,
+      message: error.message,
+    };
+  }
   let trades = (extraction?.trades || []).filter(
     (trade) => trade.chart_date === captureDate,
   );
@@ -1330,6 +1465,7 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
     trades,
     skipped,
     daily_note: dailyNotes?.note || null,
+    daily_resources: resourceLookup.resource ? [resourceLookup.resource] : [],
     daily_note_drawings: dailyNotes?.count || 0,
     trade_notes_found: extraction?.note_audit?.length || 0,
     note_assignments: publicNoteAssignments(extraction?.note_audit),
@@ -1399,6 +1535,7 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
   }
   return {
     ...result,
+    resource_lookup: resourceLookup,
     trade_notes_deleted: keptRemoval ? acceptedCandidates.length : 0,
     ...(cleanupWarning ? { trade_note_cleanup_warning: cleanupWarning } : {}),
   };

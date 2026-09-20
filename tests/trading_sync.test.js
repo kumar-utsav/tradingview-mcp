@@ -10,6 +10,8 @@ import {
   classifyLevelLabel,
   createBacktestExtractionExpression,
   enrichTradesWithStudyLabels,
+  extractTradeWithNetoVideo,
+  findTradeWithNetoResource,
   finishTradeNoteDeletionExpression,
   restorePositionIsolationExpression,
   showOnlyPositionExpression,
@@ -23,6 +25,26 @@ function response(body, status = 201, replayed = false) {
     json: async () => body,
     headers: { get: () => (replayed ? "true" : null) },
   };
+}
+
+function youtubeResponse(html, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => html,
+  };
+}
+
+function youtubeHtml(videos = []) {
+  const data = {
+    contents: videos.map(({ id, title }) => ({
+      videoRenderer: {
+        videoId: id,
+        title: { runs: [{ text: title }] },
+      },
+    })),
+  };
+  return `<script>var ytInitialData = ${JSON.stringify(data)};</script>`;
 }
 
 function withConfiguration(run) {
@@ -60,6 +82,31 @@ const backtestTrade = {
 };
 
 describe("Trading journal capture sync", () => {
+  it("matches the Trade With Neto video by the chart date title prefix", async () => {
+    const html = youtubeHtml([
+      { id: "wrong", title: "260708 Professional Patience" },
+      { id: "x-VygVybxcU", title: "260709 The Market Earns Your Capital" },
+    ]);
+    assert.deepEqual(extractTradeWithNetoVideo(html, "2026-07-09"), {
+      title: "260709 The Market Earns Your Capital",
+      video_id: "x-VygVybxcU",
+      url: "https://www.youtube.com/watch?v=x-VygVybxcU",
+    });
+    const lookup = await findTradeWithNetoResource("2026-07-09", {
+      fetch: async (url) => {
+        assert.equal(
+          url,
+          "https://www.youtube.com/@TradeWithNeto/search?query=260709",
+        );
+        return youtubeResponse(html);
+      },
+    });
+    assert.deepEqual(lookup.resource, {
+      title: "Trade with Neto",
+      url: "https://www.youtube.com/watch?v=x-VygVybxcU",
+    });
+  });
+
   it("uses interactive extraction and sends directly to the imported endpoint", () =>
     withConfiguration(async () => {
       const requests = [];
@@ -658,6 +705,15 @@ describe("Trading backtest batch capture sync", () => {
           return "cG5n";
         },
         getPineLabels: async () => ({ success: true, studies: [] }),
+        resourceFetch: async () =>
+          youtubeResponse(
+            youtubeHtml([
+              {
+                id: "video-1",
+                title: "260801 Review the Decision",
+              },
+            ]),
+          ),
         fetch: async (url, options) => {
           actions.push("publish");
           requests.push({ url, options });
@@ -681,6 +737,12 @@ describe("Trading backtest batch capture sync", () => {
       assert.equal(body.capture_date, "2026-08-01");
       assert.equal(body.trades.length, 1);
       assert.equal(body.daily_note, "Waited for the opening range.");
+      assert.deepEqual(body.daily_resources, [
+        {
+          title: "Trade with Neto",
+          url: "https://www.youtube.com/watch?v=video-1",
+        },
+      ]);
       assert.equal(body.skipped.length, 1);
       assert.equal(body.trade_notes_found, 1);
       assert.equal(body.trade_screenshots.length, 1);
@@ -778,6 +840,7 @@ describe("Trading backtest batch capture sync", () => {
               return "cG5n";
             },
             getPineLabels: async () => ({ success: true, studies: [] }),
+            resourceFetch: async () => youtubeResponse(youtubeHtml()),
             fetch: async () => {
               actions.push("publish");
               return response({ message: "Backend rejected capture" }, 400);
