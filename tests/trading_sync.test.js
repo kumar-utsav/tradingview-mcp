@@ -750,6 +750,9 @@ describe("Trading backtest batch capture sync", () => {
       assert.equal("drawing_id" in body.note_assignments[0], false);
       assert.equal(body.screenshot_context.date_visible, true);
       assert.equal(firstResult.trade_notes_deleted, 1);
+      assert.equal(firstResult.tag_review.chart_review_required, true);
+      assert.equal(firstResult.tag_review.workflow_complete, false);
+      assert.match(firstResult.tag_review.next_action, /verify exact tags/);
       assert.deepEqual(actions.slice(0, 8), [
         "delete",
         "screenshot",

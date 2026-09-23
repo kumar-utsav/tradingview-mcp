@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape } from '../src/core/drawing.js';
+import { drawShape, setTooltip } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -281,6 +281,53 @@ describe('drawing.js — sanitized evaluate calls', () => {
     const call = evaluate.calls.find(c => c.includes('createMultipointShape'));
     assert.ok(call, 'createMultipointShape called');
     assert.ok(call.includes('"trend_line"'), 'shape name via safeString');
+  });
+
+  it('drawShape registers escaped hover-only tooltip metadata', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('getAllShapes')) return calls.filter(call => call.includes('createShape')).length ? ['shape-1'] : [];
+      return undefined;
+    };
+    await drawShape({
+      shape: 'horizontal_line',
+      point: { time: 100, price: 50 },
+      tooltip: 'PDH "quoted"\nPWH',
+      reference_levels: [{ label: 'PDC', price: 49.99 }],
+      dynamic_session_levels: true,
+      _deps: { evaluate, getChartApi: async () => 'window.__api' },
+    });
+    const tooltipCall = calls.find(call => call.includes('__tvmcpDrawingTooltipManagerV1'));
+    assert.ok(tooltipCall, 'tooltip manager installed');
+    assert.doesNotThrow(() => new Function(tooltipCall), 'tooltip script is valid JavaScript');
+    assert.ok(tooltipCall.includes('PDH \\"quoted\\"\\nPWH'), 'tooltip safely escaped');
+    assert.ok(tooltipCall.includes('crossHairMoved'), 'crosshair hover subscription used');
+    assert.ok(tooltipCall.includes('event.clientX'), 'tooltip follows the real pointer x coordinate');
+    assert.ok(tooltipCall.includes('event.clientY'), 'tooltip follows the real pointer y coordinate');
+    assert.ok(!tooltipCall.includes('params.offsetX'), 'undocumented crosshair offsets are not used');
+    assert.ok(tooltipCall.includes('getDynamicSessionLevels'), 'live session levels are recalculated on hover');
+    assert.ok(tooltipCall.includes('current.minutes >= 575'), '5-minute range waits until 09:35 ET');
+    assert.ok(tooltipCall.includes('current.minutes >= 585'), '15-minute range waits until 09:45 ET');
+    assert.ok(tooltipCall.includes('PDC'), 'fixed Key Levels references are registered');
+    assert.ok(tooltipCall.includes('dynamicSessionLevels: true'), 'dynamic session matching is enabled');
+  });
+
+  it('setTooltip derives bounds from an existing drawing', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      if (expr.includes('getShapeById')) return { points: [{ price: 49.5 }, { price: 50.25 }] };
+      return undefined;
+    };
+    const result = await setTooltip({
+      entity_id: 'shape-1',
+      tooltip: 'Major support\nTouches: PDL',
+      _deps: { evaluate, getChartApi: async () => 'window.__api' },
+    });
+    assert.equal(result.lower_price, 49.5);
+    assert.equal(result.upper_price, 50.25);
+    assert.ok(calls.some(call => call.includes('Major support\\nTouches: PDL')));
   });
 });
 

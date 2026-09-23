@@ -11,9 +11,10 @@ Create a readable map that supports profit-taking whether price moves up or down
 
 1. Call `chart_get_state` once and record the active symbol and timeframe.
 2. Read the current quote, symbol metadata when needed, recent OHLCV, existing drawings, and a chart screenshot. Use individual bars because price-action structure is required.
-3. Treat every new trading date or user-requested refresh as a fresh analysis. Do not carry prior prices forward merely because they worked earlier.
-4. Use the active timeframe as the primary structure. If it does not provide credible targets in both directions, briefly inspect a meaningfully higher timeframe and restore the original timeframe before drawing.
-5. Prefer repeated swing highs/lows, support-resistance flips, consolidation boundaries, displacement origins, and reactions supported by volume or higher-timeframe confluence.
+3. Reconcile the returned OHLCV prices with the visible candle scale before choosing levels. If dividend adjustment, contract adjustment, or another chart transformation makes the data feed disagree with visible price action, inspect the visible candles directly and use the prices shown on the active chart. Do not declare price discovery or substitute projected targets until the discrepancy is resolved.
+4. Treat every new trading date or user-requested refresh as a fresh analysis. Do not carry prior prices forward merely because they worked earlier.
+5. Use the active timeframe as the primary structure. If it does not provide credible targets in both directions, briefly inspect a meaningfully higher timeframe and restore the original timeframe before drawing.
+6. Prefer repeated swing highs/lows, support-resistance flips, consolidation boundaries, displacement origins, and reactions supported by volume or higher-timeframe confluence.
 
 Never delete unknown drawings. Remove only drawings created by the preceding key-level run when their entity IDs are known. Do not use `draw_clear` when user drawings may be present.
 
@@ -51,9 +52,30 @@ The number of drawings is an outcome of these rules, not a target.
 - Major support: thicker green line or green zone.
 - Major resistance: thicker red line or red zone.
 - Intermediate downside target: thinner teal line or zone.
-- Intermediate upside target: thinner orange line or zone.
+- Intermediate upside target: thinner high-contrast purple line or zone. Never use orange because it lacks sufficient visibility on the chart.
 - Use transparent zone fills so candles remain readable.
 - Extend rectangles into future bars so they remain usable during subsequent price movement.
+
+When the chart contains the `Key Levels` indicator, use its definitions as the
+source of truth for tooltip confluence. Include every enabled value available
+from the indicator: PMH/PML, PDH/PDL and the older PDH2-4/PDL2-4 ladder,
+PWH/PWL, PDC, current RTH Open and High/Low, completed 5MH/5ML and 15MH/15ML,
+ATH, Psych, Dynamite, and enabled 50-cent levels. Pass fixed values as
+`reference_levels` and enable `dynamic_session_levels` for intraday values.
+
+Dynamic session references must refresh from live chart bars whenever the user
+hovers a drawing. PMH/PML remain live until 09:30 America/New_York; current
+High/Low remain live through the session; Open is fixed from the 09:30 bar; and
+5MH/5ML and 15MH/15ML appear only after 09:35 and 09:45 respectively, matching
+the indicator. A new pre-market session resets these values. Match a line
+within the instrument's tick-aware clustering tolerance and a zone within its
+price bounds. The hover-only tooltip states the drawing's structural role and
+every matching indicator reference, or `No Key Levels indicator touch` when
+none match. Every zone tooltip must also include an explicit `Zone range:
+<low>–<high>` line, with both boundaries formatted to the instrument's tick or
+pip precision. Position the tooltip next to the actual crosshair pointer and
+keep it inside the visible window; never render persistent chart text or anchor
+it to a fixed corner.
 
 Use `draw_shape` with `horizontal_line` for precise levels and `rectangle` for qualifying clusters. Preserve the active chart timeframe.
 

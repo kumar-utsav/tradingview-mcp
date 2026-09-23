@@ -1535,6 +1535,12 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
   }
   return {
     ...result,
+    tag_review: {
+      ...(result.tag_review || {}),
+      chart_review_required: true,
+      workflow_complete: false,
+      next_action: "Read every saved trade and chart for this day, its trade and daily notes, and the live tag catalog. Review every active checklist group against pre-entry evidence, preserve user corrections, save supported selections, and GET the trades again to verify exact tags. Numeric capture success is not tagging completion. Verify the saved video resource as well.",
+    },
     resource_lookup: resourceLookup,
     trade_notes_deleted: keptRemoval ? acceptedCandidates.length : 0,
     ...(cleanupWarning ? { trade_note_cleanup_warning: cleanupWarning } : {}),

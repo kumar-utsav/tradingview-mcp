@@ -72,7 +72,7 @@ export function registerTradingSyncTools(server) {
   );
   server.tool(
     "capture_backtest_day",
-    "Reconcile one visible TradingView day, match its YYMMDD date to the Trade With Neto YouTube stream and attach it as a daily resource, use DAY: for the daily thought and numbered notes such as 1: and 2: to match trades from earliest to latest; capture an isolated screenshot for each trade with other Long/Short tools temporarily hidden, restore chart visibility, and safely remove assigned notes before publishing",
+    "Reconcile one visible TradingView day, match its YYMMDD date to the Trade With Neto YouTube stream and attach it as a daily resource, use DAY: for the daily thought and numbered notes such as 1: and 2: to match trades from earliest to latest; capture an isolated screenshot for each trade with other Long/Short tools temporarily hidden, restore chart visibility, and safely remove assigned notes before publishing. REQUIRED AFTER CAPTURE: inspect every saved trade chart and its notes against the live tag catalog, apply all supported checklist tags, preserve user corrections, and read back saved tags and video resources. The tool only supplies provisional tags; do not report tagging complete until this review and verification finish",
     dayInput,
     async ({ date, idempotency_key }) => {
       try {

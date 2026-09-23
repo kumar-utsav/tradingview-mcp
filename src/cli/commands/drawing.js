@@ -13,12 +13,24 @@ register('draw', {
         price2: { type: 'string', description: 'Second point price (for trend_line, rectangle)' },
         time2: { type: 'string', description: 'Second point time (for trend_line, rectangle)' },
         text: { type: 'string', description: 'Text content (for text shapes)' },
+        tooltip: { type: 'string', description: 'Hover-only tooltip text' },
+        'tooltip-tolerance': { type: 'string', description: 'Price distance around the drawing that activates its tooltip' },
+        'dynamic-session-levels': { type: 'boolean', description: 'Refresh live session confluences whenever the tooltip opens' },
         overrides: { type: 'string', description: 'JSON style overrides' },
       },
       handler: (opts) => {
         const point = { time: Number(opts.time), price: Number(opts.price) };
         const point2 = opts.price2 ? { time: Number(opts.time2), price: Number(opts.price2) } : undefined;
-        return core.drawShape({ shape: opts.type || 'horizontal_line', point, point2, overrides: opts.overrides, text: opts.text });
+        return core.drawShape({
+          shape: opts.type || 'horizontal_line',
+          point,
+          point2,
+          overrides: opts.overrides,
+          text: opts.text,
+          tooltip: opts.tooltip,
+          tooltip_tolerance: opts['tooltip-tolerance'] === undefined ? undefined : Number(opts['tooltip-tolerance']),
+          dynamic_session_levels: opts['dynamic-session-levels'],
+        });
       },
     }],
     ['list', {
