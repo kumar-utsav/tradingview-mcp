@@ -49,12 +49,13 @@ The number of drawings is an outcome of these rules, not a target.
 
 ## Draw Consistently
 
-- Major support: thicker green line or green zone.
-- Major resistance: thicker red line or red zone.
-- Intermediate downside target: thinner teal line or zone.
-- Intermediate upside target: thinner high-contrast purple line or zone. Never use orange because it lacks sufficient visibility on the chart.
-- Use transparent zone fills so candles remain readable.
-- Extend rectangles into future bars so they remain usable during subsequent price movement.
+- Major support: 3-pixel green line or green zone.
+- Major resistance: 3-pixel red line or red zone.
+- Intermediate downside target: 1-pixel teal line or teal zone.
+- Intermediate upside target: 1-pixel high-contrast purple line or purple zone. Never use orange because it lacks sufficient visibility on the chart.
+- Zones always use a borderless translucent fill: set the rectangle border color fully transparent and use 88 percent fill transparency. Never add a visible zone outline or vary its border width. Major versus intermediate zone strength is communicated only by the fixed role color above; stroke thickness applies only to precise line levels.
+- Bound every drawing to the active trading date's full extended-hours session, from 04:00 through 20:00 America/New_York. Historical price action may define a level, but the drawing itself must not extend into a previous or following trading date.
+- Use session-bounded rectangles for zones and finite horizontal `trend_line` segments for precise levels. Do not use infinite `horizontal_line` drawings for the key-level map.
 
 When the chart contains the `Key Levels` indicator, use its definitions as the
 source of truth for tooltip confluence. Include every enabled value available
@@ -77,16 +78,17 @@ pip precision. Position the tooltip next to the actual crosshair pointer and
 keep it inside the visible window; never render persistent chart text or anchor
 it to a fixed corner.
 
-Use `draw_shape` with `horizontal_line` for precise levels and `rectangle` for qualifying clusters. Preserve the active chart timeframe.
+Use `draw_shape` with a flat two-point `trend_line` for precise levels and `rectangle` for qualifying clusters. Preserve the active chart timeframe.
 
 ## Verify and Report
 
 After drawing:
 
 1. Use `draw_list` to confirm the expected line and rectangle count.
-2. Capture and visually inspect the chart.
-3. Correct overlaps, excessive density, opaque fills, missing directional coverage, or spacing violations before reporting completion.
-4. Report the active symbol and timeframe, nearest upside and downside targets, the unit and spacing convention used, major versus intermediate targets, and any projected levels.
+2. Verify that every drawing begins on the 04:00 America/New_York bar and ends on the final bar closing at 20:00, with left/right extension disabled. TradingView can snap a requested future timestamp to a loaded bar, so inspect the resolved drawing points and correct them when necessary.
+3. Capture and visually inspect the chart.
+4. Correct overlaps, excessive density, opaque fills, missing directional coverage, or spacing violations before reporting completion.
+5. Report the active symbol and timeframe, nearest upside and downside targets, the unit and spacing convention used, major versus intermediate targets, and any projected levels.
 
 ## Incorporate User Feedback
 
