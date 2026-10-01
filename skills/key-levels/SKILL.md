@@ -23,16 +23,17 @@ Never delete unknown drawings. Remove only drawings created by the preceding key
 Determine the instrument's tick or pip convention from symbol metadata and market convention. If the user's meaning of "pip" is ambiguous and would materially change the map, ask; otherwise state the convention used.
 
 - Honor spacing and zone-width preferences the user supplied for the active instrument or setup.
+- Standing SPY calibration from the user: leave at least 0.50 of clear price between the nearest edges of adjacent zones. Do not approve a map from center spacing alone. If two zones leave less than 0.50 of open space, merge them only when the combined cluster still fits the zone-width limit; otherwise keep the stronger structure and remove the weaker target. Never move, invent, or project a level merely to fill a gap; an honest gap is preferable when price action does not support another target.
 - Do not transfer a raw dollar distance from one ticker or timeframe to another.
 - When no configuration exists, infer a practical spacing band from the active timeframe's volatility, visible range, and density of meaningful reaction prices. It must allow useful scale-outs without clutter.
-- Keep adjacent line prices or zone centers within the selected spacing band when possible. Do not leave gaps above its maximum; prefer genuine intermediate structure and use a clearly identified projected target only when structure is absent.
+- Use the spacing band only to prevent clutter and overprecision. It is not a quota or coverage requirement: allow gaps larger than its nominal maximum whenever genuine structure is absent.
 - Treat candidates as a possible zone only when their separation is small relative to the selected spacing band. As a default, the entire zone should be no wider than roughly one-third of the normal center-to-center gap.
 
 For a setup where the user specifies 70-100 pips between targets and 10-30 pips for clustering, apply those values in the active instrument's confirmed pip convention rather than interpreting them as universal dollar amounts.
 
 ## Choose Lines and Zones
 
-Include both:
+Evaluate both categories, but draw only candidates supported by price action:
 
 - **Major structural levels:** the strongest multi-touch or multi-timeframe areas.
 - **Intermediate profit-taking levels:** useful scale-out references between major structures.
@@ -43,7 +44,7 @@ Apply these rules in order:
 2. If one price clearly dominates and nearby evidence is weaker, draw the dominant price as a line.
 3. If candidates are closer than the minimum spacing but do not qualify for a zone, keep only the stronger candidate.
 4. Never widen a zone merely to absorb another level that falls outside the zone-width limit.
-5. Do not manufacture a dense, evenly spaced ladder when price-action evidence exists. Projected levels are a fallback for directional coverage and must be distinguished from proven structure.
+5. Do not manufacture a dense, evenly spaced ladder or reposition a candidate to improve visual spacing. Add a projected level only when the user explicitly requests projections; draw it dashed and identify it as projected in the tooltip.
 
 The number of drawings is an outcome of these rules, not a target.
 

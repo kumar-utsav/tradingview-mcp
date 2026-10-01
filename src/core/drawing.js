@@ -137,6 +137,14 @@ function tooltipInstallExpression({ apiPath, entityId, tooltip, low, high, toler
             manager.element.style.display = 'none';
             return;
           }
+          // Drawings can also be deleted directly through TradingView's UI.
+          // In that case no MCP cleanup hook runs, so discard registrations
+          // whose drawing no longer exists before matching the hover.
+          Object.keys(manager.items).forEach(function(id) {
+            var shape = null;
+            try { shape = manager.chart.getShapeById(id); } catch (error) {}
+            if (!shape) delete manager.items[id];
+          });
           var best = null;
           var bestDistance = Infinity;
           Object.keys(manager.items).forEach(function(id) {
@@ -358,6 +366,36 @@ export async function removeOne({ entity_id }) {
   return { success: true, entity_id: result?.entity_id, removed: result?.removed, remaining_shapes: result?.remaining_shapes };
 }
 
+export async function setVisualOrder({ entity_id, action, _deps }) {
+  const { evaluate, getChartApi } = _resolve(_deps);
+  const apiPath = await getChartApi();
+  const methods = {
+    bring_to_front: 'bringToFront',
+    send_to_back: 'sendToBack',
+  };
+  const method = methods[action];
+  if (!method) throw new Error(`Unsupported visual-order action: ${action}`);
+  const result = await evaluate(`
+    (function() {
+      var api = ${apiPath};
+      var eid = ${safeString(entity_id)};
+      var shape = api.getShapeById(eid);
+      if (!shape) return { error: 'Shape not found: ' + eid };
+      if (typeof shape[${safeString(method)}] !== 'function') {
+        return { error: 'Visual-order action is unavailable for: ' + eid };
+      }
+      shape[${safeString(method)}]();
+      return {
+        entity_id: eid,
+        action: ${safeString(action)},
+        zorder: typeof shape.zorder === 'function' ? shape.zorder() : null
+      };
+    })()
+  `);
+  if (result?.error) throw new Error(result.error);
+  return { success: true, ...result };
+}
+
 export async function clearAll() {
   const apiPath = await _getChartApi();
   await _evaluate(`
@@ -368,4 +406,28 @@ export async function clearAll() {
     })()
   `);
   return { success: true, action: 'all_shapes_removed' };
+}
+
+export async function cleanupTooltips() {
+  const apiPath = await _getChartApi();
+  const result = await _evaluate(`
+    (function() {
+      var manager = window[${safeString(TOOLTIP_MANAGER_KEY)}];
+      if (!manager || !manager.items) return { removed: 0, remaining: 0 };
+      var removed = 0;
+      Object.keys(manager.items).forEach(function(id) {
+        var shape = null;
+        try { shape = ${apiPath}.getShapeById(id); } catch (error) {}
+        if (!shape) {
+          delete manager.items[id];
+          removed += 1;
+        }
+      });
+      if (!Object.keys(manager.items).length && manager.element) {
+        manager.element.style.display = 'none';
+      }
+      return { removed: removed, remaining: Object.keys(manager.items).length };
+    })()
+  `);
+  return { success: true, ...result };
 }

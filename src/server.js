@@ -56,7 +56,7 @@ Pine Script development:
 Screenshots: capture_screenshot → regions: "full", "chart", "strategy_tester"
 Replay: replay_start → replay_step → replay_trade → replay_status → replay_stop
 Batch: batch_run → run action across multiple symbols/timeframes
-Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
+Drawing: draw_shape → horizontal_line, trend_line, rectangle, text/text_note, long_position, short_position; draw_set_visual_order → bring_to_front/send_to_back
 Alerts: alert_create, alert_list, alert_delete
 Strategy monitor: strategy_monitor_start → strategy_monitor_events → strategy_monitor_stop
 Trading capture sync: capture_journal_call_trade / capture_journal_put_trade / capture_journal_call_miss / capture_journal_put_miss / capture_backtest_day / capture_backtest_batch

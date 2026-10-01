@@ -1,0 +1,6 @@
+interface:
+  display_name: "Capture Backtest Day"
+  short_description: "Capture, review and verify trading records"
+  default_prompt: "Use $capture-backtest-day for the visible TradingView day."
+policy:
+  allow_implicit_invocation: true

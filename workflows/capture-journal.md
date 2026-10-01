@@ -1,0 +1,201 @@
+# Capture journal
+
+## Scope and fast path
+
+On **capture journal**, **capture journal day**, or a clear dictation variant,
+enrich every already-imported journal row for the requested date; otherwise use
+the single visible TradingView session date. If several dates are visible and the
+intended one is unclear, ask. Use `America/Los_Angeles` with DST. Exclude
+`outcome: Miss`. Never create/import rows, use backtest ingestion, merge separate
+rows, or split one row's scale-ins/outs/reentries. Invocation authorizes these
+journal/chart updates, not broker orders, commits, deployment, or other dates.
+
+Minimize round trips: read chart state/panes once, use the snapshot's batched app
+data and prefilled manifest, inspect saved evidence before requesting Pine/OHLC,
+and fetch only the bounded evidence still missing. Reuse data throughout the run;
+do not repeatedly fetch the catalog, chart state, or full history.
+
+## 1. Snapshot and preserve
+
+Record the original pane, symbol, timeframe, and visible range. Every annotation
+and screenshot must retain that timeframe and zoom: never change resolution,
+call `chart_set_visible_range`, use zoom controls, or alter bar spacing. Horizontal
+panning is allowed only to reach an off-screen date; restore the original view.
+
+From `/Users/utsav/Projects/tradingview-mcp`, create a unique run directory:
+
+```sh
+node workflows/journal-capture.mjs snapshot YYYY-MM-DD journal-captures/YYYY-MM-DD-HHMMSS
+```
+
+This concurrently saves `before.json`, the live journal catalog/groups, daily
+notes/resources, recovery charts, and `review.template.json`. Do not reuse a run
+directory. If there are no rows, report it and stop. Treat imported IDs, fills,
+P/L, outcomes, grouping, notes, tags, RR, and corrections as source data. Analyze
+a sorted copy of transactions; never reorder the saved array.
+
+The app API defaults to `http://100.125.89.9:5555`; set `TRADING_API_URL` when
+live verification finds another endpoint. Ensure the journal list includes every
+page/record before continuing.
+
+## 2. Inspect matching evidence
+
+For each row, prefer the pane matching its underlying ticker and stored
+`time_frame`; the active pane may be SPX or another timeframe. The stored
+`entry_candle` identifies context but uses the bookmarklet convention (the candle
+before the fill bucket, so a 07:11:12 fill may store 07:10). Do not rewrite it.
+Actual fill times control transaction markers and the position tool.
+
+View the saved chart first. If missing, stale, mismatched, or inadequate, navigate
+to the matching historical session at the preserved zoom and capture enough
+pre-entry structure, entry, levels, and management context. Preserve multi-pane
+context when relevant; focus a pane only to read candles. All panes used as
+evidence must show the same date. Reading/downloading an image is not visual
+inspection. A prior saved image is review evidence only; it never replaces the
+fresh per-trade annotated PNG required below.
+
+Match notes/drawings by explicit trade ID, else by unique date+ticker+direction+
+timing. Inspect text, rectangles, position drawings, and relevant indicator
+boxes/lines/labels. Use bounded historical bars only when pixels are insufficient.
+Never compare option premium with underlying levels, infer RR from option P/L, or
+use today's levels for a past trade. Save RR only from a uniquely matched position
+drawing; otherwise preserve it. Remove only this run's temporary annotations.
+
+### Chart-text notes
+
+Before creating temporary labels, inspect text/note/callout/balloon drawings
+anchored to the date. Order trades by first actual entry time, then ID.
+
+- `1: text`, `#2) text`, `3. text`, and `4- text` (ordinals 1-999) route to that
+  chronological trade; strip the prefix. Screen position never overrides it.
+- Case-insensitive `DAY:` routes, without its prefix, to shared daily notes.
+- Preserve multiple notes in drawing-time order separated by a blank line; do
+  not duplicate destination text or replace existing notes/resources.
+- Duplicate/out-of-range ordinals, empty prefixed text, and wrong-date drawings
+  are unresolved. Record drawing ID/reason and never shift later ordinals.
+- Use unnumbered non-`DAY:` text only when its normal trade association is unique.
+
+Record source drawing IDs and stripped text. Use `notes_append` + `notes_source`
+for trade notes. Update daily notes through
+`PUT /journal/daily-notes/YYYY-MM-DD`, preserving `external_resources`, and read
+back both destinations. Source drawings are user artifacts; do not delete them.
+
+## 3. Annotate each trade
+
+Fast path: after the snapshot, run
+`node workflows/journal-annotate.mjs /absolute/run/before.json`. This reads the
+imported fills and underlying candles, draws each position and compact BUY/SELL
+callouts with leader lines, saves one PNG per trade, and removes only its own
+temporary drawings. It restores the chart's starting symbol, timeframe, and
+visible range. If replay is active before the final fill, advance replay first;
+the script checks this before changing the chart. All rows in one run currently
+need the same minute timeframe. Inspect `annotation-draft.json`, the prefilled
+`review.draft.json`, every PNG, and every skip. The
+script places labels around candle bodies using screen coordinates, but a person
+must still check overlaps, clipping, indicator conflicts, and trade context.
+Correct a draft by hand before marking `overlap_checked` and
+`screenshot_after_annotations` true in `review.json`; the script never sets
+those review booleans or saves to the journal app.
+
+Work one row at a time so run-created annotations never overlap another trade.
+For each row, using a chronological copy of all imported transactions:
+
+1. Create one `long_position` for a Call or `short_position` for a Put. Start on
+   the candle containing the first actual entry; anchor a long at its underlying
+   HIGH and a short at its underlying LOW. Option prices are never chart Y-values.
+2. The tool spans the entire row. Find the final closing fill that returns the
+   position to flat. If the ledger never returns to flat, skip with that reason.
+3. For every outcome, the position-tool endpoint is the maximum favorable
+   excursion from first entry through final exit inclusive—lowest LOW for a
+   short, highest HIGH for a long; for ties use the first after entry. Never
+   search past the final exit and never substitute the final exit merely because
+   the trade was a win or break-even. This endpoint is required so the tool
+   shows how far the trade traveled and makes its potential risk-to-reward
+   visible.
+4. Display stop: exactly $0.50 adverse on the underlying (short `entry + .50`,
+   long `entry - .50`). The stop is fixed for every outcome and does not
+   establish planned risk or RR.
+5. After the position tool, mark every fill on its actual `filledTime` candle.
+   Each callout line is `BUY|SELL quantity @ $price` with two decimals, using the
+   imported option price (for example `BUY 2 @ $0.95`). Same-side fills in one
+   bucket may share a multiline callout only if every complete line is readable;
+   opposite sides remain distinct.
+6. Anchor callouts to candle high/low plus a small offset and leader line. Bring
+   every callout to front above the position tool and all run-created marks.
+
+Use vertical lanes for nearby fills. Reposition annotations—not the chart—until
+labels, bands, candles, and exit are unclipped, unambiguous, and collision-free.
+Before the PNG, read drawings back and confirm tool type, entity IDs, start/end
+candles and prices, $0.50 stop, every marker's text/anchor, visual order, and no
+overlap. Capture only then, record the evidence in `chart_annotations`, remove
+only that row's temporary marks, and continue. Every screenshot uses the same
+original resolution/range. A combined day view is optional and needs separate
+trade-ID lanes.
+
+Generated position bands are duration markers, not RR evidence unless an
+independent plan or uniquely matched pre-existing drawing supports their levels.
+
+## 4. Review the live catalog
+
+Use the snapshot's complete live journal/shared catalog, including relevant tags
+in inactive legacy groups. Review every group and record a supported selection or
+an explicit unknown/not-applicable reason. Follow selection modes; require no
+arbitrary tag count and never copy backtest-only tags. Give concrete evidence for
+each selected tag.
+
+Keep decisions separate: Setup Review is valid/planned-momentum-exception/
+invalid/unclear; Entry Execution is planned/justified structural adjustment/
+unplanned; Trade Management is planned/justified adjustment/fear exit/held past
+invalidation/unknown. Outcome alone proves none of them. Read stored HTML as text
+without rewriting it. Intent/emotion may come from a note when attributed; do not
+append generated analysis as the user's note. FOMO,
+chasing, P/L decisions, thesis/risk violations, fear exits, and holding past
+invalidation need specific evidence. Size alone does not prove a risk violation.
+Preserve existing tags unless explicit contrary evidence supports removal.
+
+For positional ranges use the entry anchor HIGH for Call and LOW for Put against
+completed, correctly dated bounds: premarket 01:00-06:30 Pacific, previous regular
+session, opening 5m 06:30-06:35, and opening 15m 06:30-06:45. Respect holidays and
+short sessions. A missing/incomplete range is UNKNOWN. If the catalog omits the
+boundary rule, equality is inside and that convention must be recorded. Avoid
+future-confirmed pivots. An opposing level is an obstacle, not automatic
+confluence; a retest needs leave-and-return, not a wick alone; reentry issues
+require the same thesis/zone and actual sequence.
+
+`journal-workflow-2026-09-23/` is historical reference only (113-record baseline
+plus observations); the current catalog, plan, and user corrections win.
+
+## 5. Save and verify
+
+Complete the generated `review.template.json`, save it as `review.json`, and
+include each snapshot ID exactly once in `trades` or `skipped` with a reason. The
+template already supplies immutable chart identity, existing tags, all group IDs,
+expected position rules, and exact transaction label text. Fill its evidence,
+entity IDs, geometry, preserved range, review booleans, and optional note/RR
+fields; do not delete required fields. Optional `rr` needs `rr_evidence`;
+`notes_append` needs `notes_source`; never supply a replacement `notes` field.
+
+```sh
+node workflows/journal-capture.mjs review /absolute/run/review.json
+node workflows/journal-capture.mjs review /absolute/run/review.json --apply
+```
+
+Dry-run first. The helper validates complete ID coverage, chart identity and PNG,
+annotation/fill coverage, catalog/group/evidence rules, tag removals/conflicts,
+staleness, and one preserved view. Apply updates only chart, tags, optional RR,
+and appended notes, then independently verifies records, exact tag sets, imported
+financial fields, and chart bytes. HTTP success alone is not completion.
+
+The API is non-transactional. On interruption, concurrency, or read-back mismatch,
+stop; preserve recovery files, inspect partial state, and take a new snapshot
+before continuing. Never blind-retry or roll back another person's changes.
+On a normal rerun, detect existing notes/media and enrich the same IDs without
+duplicating them.
+
+Preserve daily resources. Attach a video only when its URL and date are verified
+from the supplied/established source; preserve unrelated links and omit `notes`
+when updating only `external_resources`. Read daily notes/resources and journal
+rows back. Restore the original TradingView view. Report date, rows reviewed,
+tools/markers/charts/tags/notes/resources verified, and every skip or unresolved
+item. Do not claim completion with required work unresolved. When only editing
+this workflow, perform no live capture writes.

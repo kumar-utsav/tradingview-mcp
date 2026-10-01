@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeString, requireFinite } from '../src/connection.js';
 import { setSymbol, setTimeframe, setType, manageIndicator, setVisibleRange } from '../src/core/chart.js';
-import { drawShape, setTooltip } from '../src/core/drawing.js';
+import { drawShape, setTooltip, setVisualOrder } from '../src/core/drawing.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
 
@@ -328,6 +328,31 @@ describe('drawing.js — sanitized evaluate calls', () => {
     assert.equal(result.lower_price, 49.5);
     assert.equal(result.upper_price, 50.25);
     assert.ok(calls.some(call => call.includes('Major support\\nTouches: PDL')));
+  });
+
+  it('setVisualOrder safely brings a drawing to the front', async () => {
+    const calls = [];
+    const evaluate = async (expr) => {
+      calls.push(expr);
+      return { entity_id: 'shape-1', action: 'bring_to_front', zorder: 5000 };
+    };
+    const result = await setVisualOrder({
+      entity_id: 'shape-1',
+      action: 'bring_to_front',
+      _deps: { evaluate, getChartApi: async () => 'window.__api' },
+    });
+    assert.equal(result.zorder, 5000);
+    assert.ok(calls[0].includes('bringToFront'));
+    assert.ok(calls[0].includes('"shape-1"'));
+  });
+
+  it('setVisualOrder rejects unsupported actions before evaluation', async () => {
+    const { _deps, evaluate } = mockDeps();
+    await assert.rejects(
+      () => setVisualOrder({ entity_id: 'shape-1', action: 'sideways', _deps }),
+      /Unsupported visual-order action/,
+    );
+    assert.equal(evaluate.calls.length, 0);
   });
 });
 

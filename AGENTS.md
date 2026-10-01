@@ -127,3 +127,23 @@ Codex ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView D
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+## Personal capture workflows
+
+When the user says "capture backtest day" (including dictation variants), use
+`skills/capture-backtest-day/SKILL.md` and complete the chart, notes, checklist,
+tag and dated-video verification in `workflows/capture-backtest-day.md`. The
+user authorized this tagging workflow on 2026-09-21. The manually reviewed
+reference is `tag-audit-2026-09-21/`; current catalog definitions take precedence.
+
+When the user says "capture journal" or "capture journal day", use
+`skills/capture-journal/SKILL.md` and process all already-imported journal trades
+for the visible chart day under `workflows/capture-journal.md`. The user selected
+all imported trades for that day on 2026-09-23. Preserve imported IDs, fills,
+P/L, outcomes and existing notes. Finish chart, notes, tags and read-back
+verification before reporting completion. The dated reference is
+`journal-workflow-2026-09-23/`; load the current catalog for each capture.
+
+These two personal skills are linked from `/Users/utsav/.agents/skills/`, so
+requests can originate in any local Codex project. Resolve their relative
+commands and run artifacts from `/Users/utsav/Projects/tradingview-mcp`.

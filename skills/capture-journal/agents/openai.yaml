@@ -1,0 +1,6 @@
+interface:
+  display_name: "Capture Journal"
+  short_description: "Capture, review and verify trading records"
+  default_prompt: "Use $capture-journal for the visible TradingView day."
+policy:
+  allow_implicit_invocation: true
