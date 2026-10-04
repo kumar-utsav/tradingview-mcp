@@ -1,6 +1,6 @@
 interface:
   display_name: "Capture Journal"
-  short_description: "Capture, review and verify trading records"
-  default_prompt: "Use $capture-journal for the visible TradingView day."
+  short_description: "Annotate trades, pause for notes, then save the journal"
+  default_prompt: "Use $capture-journal to annotate the visible TradingView day and pause while I add trade notes."
 policy:
   allow_implicit_invocation: true

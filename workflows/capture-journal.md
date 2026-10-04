@@ -8,12 +8,84 @@ the single visible TradingView session date. If several dates are visible and th
 intended one is unclear, ask. Use `America/Los_Angeles` with DST. Exclude
 `outcome: Miss`. Never create/import rows, use backtest ingestion, merge separate
 rows, or split one row's scale-ins/outs/reentries. Invocation authorizes these
-journal/chart updates, not broker orders, commits, deployment, or other dates.
+chart preparation in stage one and journal updates on explicit continuation in
+stage two, not broker orders, commits, deployment, or other dates.
 
 Minimize round trips: read chart state/panes once, use the snapshot's batched app
 data and prefilled manifest, inspect saved evidence before requesting Pine/OHLC,
 and fetch only the bounded evidence still missing. Reuse data throughout the run;
 do not repeatedly fetch the catalog, chart state, or full history.
+
+## Two stages and the notes handoff
+
+### Stage one: leave every trade annotated on the chart
+
+Complete sections 1-2 for the chosen day, then create the section 3 annotations
+with the TradingView MCP and retain them. The screenshot helper in section 3
+removes drawings; do not run it as the stage-one handoff. Use its exported
+`planAnnotation`/position-level utilities when useful for computing geometry,
+but create the retained tools and labels with MCP drawing tools and verify their
+properties and appearance. No journal write helper or API mutation runs here.
+
+Freeze trade order by first actual fill time, then imported ID, excluding Miss.
+Give each trade a visible identity label such as `Trade 1 | ID 2923`, separate
+from its transaction callouts. These numbers also route the user's subsequent
+notes. Do not add invented trading commentary or empty user-note placeholders.
+Use separate lanes and adjust placements across the entire day, so notes,
+leaders, and anchors from neighboring trades remain clear. Leave every trade's
+position tool and fill marks in place; do not remove one before drawing the
+next. Use matching panes for different underlyings and preserve original zoom
+and timeframe. Horizontal panning may be needed to inspect all trades.
+
+Maintain `stage.json` in the pending run directory with `phase: awaiting_notes`,
+the fixed date and snapshot path, the original pane/symbol/timeframe/range,
+ordered `{number, trade_id}` pairs, every generated drawing ID grouped by trade
+and pane, existing user-note drawing IDs/text, annotation results, and unresolved
+rows. Record drawing IDs as they are created so interrupted preparation can be
+repaired without duplicates. Exclude all generated IDs (including trade identity
+labels) from user-note extraction. Preserve pre-existing drawings and user edits.
+
+Inspect the full annotated chart and each trade; save a handoff screenshot and
+record every skip. End with the date, annotated count, number-to-ID mapping, and
+any unfinished trade. Tell the user to add notes numbered `1:`, `2:`, etc., then
+say **continue**. Keep the chart annotations and pending run files intact while
+waiting. Do not assess missing user commentary as a failure or claim journal
+saving is complete. A repeated start for this pending day reuses/repairs existing
+drawings instead of creating another set.
+
+### Stage two: read the new notes, save, and verify
+
+An explicit continuation resumes the pending date and frozen mapping. Locate
+`stage.json` from this conversation; never silently substitute the chart's new
+visible date or renumber trades. If pending state is unavailable, recover the
+mapping from the recorded IDs/chart labels before mutating anything. If more
+than one pending day could match, ask which one to resume.
+
+Read current user-note drawings and chart context first, using the chart-text
+rules below and the frozen numbering. Save their source IDs and text before
+removing any stage-one drawings. User notes may have been added or edited during
+the pause: re-read them now, rather than using stage-one text or screenshots.
+Unresolved note mappings remain unresolved; do not guess or shift other numbers.
+
+Take a fresh snapshot in a new run directory and reload the catalog, groups,
+notes/resources, and imported records. Compare IDs and fills with the stage-one
+snapshot. Preserve current notes/tags and use the fresh snapshot as the save
+baseline, while keeping the original mapping. Re-annotate a changed trade before
+saving it. Newly imported trades need their own annotations and note mapping;
+report them explicitly rather than assigning an existing ordinal to another ID.
+
+After preserving the user's notes, remove only the recorded stage-one generated
+drawings and use section 3 to capture each final trade separately, including its
+matched user-note context. Preserve user drawings throughout. Finish sections
+4-5 using notes and chart evidence together. Dry-run, apply, and verify saved
+charts, note text, tag keys/checklist selections, immutable fills/P&L/outcomes,
+and relevant daily resources. A continuation authorizes this save; do not add
+another routine confirmation step.
+
+Mark the pending stage complete only after read-back succeeds. Restore the
+original chart view and remove disposable drafts, previews and superseded
+snapshots. Keep completed capture records and requested final artifacts; preserve
+recovery files on failures and never delete the user's chart notes.
 
 ## 1. Snapshot and preserve
 
@@ -22,10 +94,14 @@ and screenshot must retain that timeframe and zoom: never change resolution,
 call `chart_set_visible_range`, use zoom controls, or alter bar spacing. Horizontal
 panning is allowed only to reach an off-screen date; restore the original view.
 
-From `/Users/utsav/Projects/tradingview-mcp`, create a unique run directory:
+From `/Users/utsav/Projects/tradingview-mcp`, create a unique run directory outside
+the checkout, using the operating system's temporary directory. Allocate a
+temporary parent with `mktemp -d` and give the snapshot helper a new child path
+(for example `/absolute/temporary/parent/stage-one`). The helper creates that
+child itself and refuses an existing directory:
 
 ```sh
-node workflows/journal-capture.mjs snapshot YYYY-MM-DD journal-captures/YYYY-MM-DD-HHMMSS
+node workflows/journal-capture.mjs snapshot YYYY-MM-DD /absolute/temporary/parent/stage-one
 ```
 
 This concurrently saves `before.json`, the live journal catalog/groups, daily
@@ -67,8 +143,10 @@ drawing; otherwise preserve it. Remove only this run's temporary annotations.
 Before creating temporary labels, inspect text/note/callout/balloon drawings
 anchored to the date. Order trades by first actual entry time, then ID.
 
-- `1: text`, `#2) text`, `3. text`, and `4- text` (ordinals 1-999) route to that
-  chronological trade; strip the prefix. Screen position never overrides it.
+- `1: text`, `#2) text`, `3. text`, and `4- text` (ordinals 1-999) route through
+  the stage-one frozen mapping; strip the prefix. For an explicitly requested
+  single-pass capture without a handoff, use first-fill-time/ID order. Screen
+  position never overrides the mapping. Ignore run-generated drawing IDs.
 - Case-insensitive `DAY:` routes, without its prefix, to shared daily notes.
 - Preserve multiple notes in drawing-time order separated by a blank line; do
   not duplicate destination text or replace existing notes/resources.
@@ -76,14 +154,16 @@ anchored to the date. Order trades by first actual entry time, then ID.
   are unresolved. Record drawing ID/reason and never shift later ordinals.
 - Use unnumbered non-`DAY:` text only when its normal trade association is unique.
 
-Record source drawing IDs and stripped text. Use `notes_append` + `notes_source`
+Stage one only records existing source notes; it does not save them. On stage
+two, record current source drawing IDs and stripped text. Use `notes_append` + `notes_source`
 for trade notes. Update daily notes through
 `PUT /journal/daily-notes/YYYY-MM-DD`, preserving `external_resources`, and read
 back both destinations. Source drawings are user artifacts; do not delete them.
 
-## 3. Annotate each trade
+## 3. Annotation rules and stage-two screenshots
 
-Fast path: after the snapshot, run
+Stage-two fast path: after reading the user's notes, preserving their source
+drawings, removing recorded stage-one marks, and taking the fresh snapshot, run
 `node workflows/journal-annotate.mjs /absolute/run/before.json`. This reads the
 imported fills and underlying candles, draws each position and compact BUY/SELL
 callouts with leader lines, saves one PNG per trade, and removes only its own
@@ -100,7 +180,9 @@ Correct a draft by hand before marking `overlap_checked` and
 `screenshot_after_annotations` true in `review.json`; the script never sets
 those review booleans or saves to the journal app.
 
-Work one row at a time so run-created annotations never overlap another trade.
+For final journal screenshots, work one row at a time so run-created annotations
+never overlap another trade. Stage one instead retains all trades' drawings,
+with separate lanes and a whole-chart overlap check.
 For each row, using a chronological copy of all imported transactions:
 
 1. Create one `long_position` for a Call or `short_position` for a Put. Start on

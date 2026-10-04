@@ -1,6 +1,6 @@
 ---
 name: capture-journal
-description: Enrich all already-imported journal trades for the visible TradingView day with annotated trade charts, transaction quantities, notes and evidence-based journal tags, then verify persistence. Use for capture journal or capture journal day.
+description: Capture imported journal trades in two stages. Annotate the TradingView day and wait for the user's trade notes; on continue, save annotated charts, notes and evidence-based tags and verify persistence. Use for capture journal, capture journal day, or continuation of a pending capture.
 ---
 
 # Capture Journal
@@ -8,12 +8,34 @@ description: Enrich all already-imported journal trades for the visible TradingV
 This local skill always operates in `/Users/utsav/Projects/tradingview-mcp`, even
 when invoked elsewhere. Read and follow the complete, maintained workflow at
 [capture-journal.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-journal.md),
-run its helpers from that project, and keep its audit artifacts there.
+run its helpers from that project. Keep pending run state and disposable evidence
+in a unique operating-system temporary directory outside the checkout; preserve
+that state across the notes handoff and clean it up after verified completion.
 
-Use the available trading and TradingView MCP tools. Ingestion is not completion:
-finish every required annotation, note/tag/resource update, and independent
-read-back. Invocation authorizes only the workflow's scoped app/chart mutations,
-not broker orders, commits, deployment, or unrelated history.
+## Two-stage capture
+
+1. **Prepare the chart.** Read every imported trade for the requested/visible
+   day. Add all position tools, BUY/SELL quantity/price callouts, diagonal leaders,
+   and clear trade numbers using the approved rules below. Leave all those
+   drawings on the chart so the user can add notes for each numbered trade.
+   Save the fixed number-to-trade-ID mapping, created drawing IDs, and chart/run
+   state. Stop with the chart ready for notes; do not write charts, notes, tags,
+   RR, or resources to the journal in this stage.
+2. **Continue and save.** When the user explicitly asks to continue the pending
+   capture after adding notes, resume its day and mapping. Read the latest user
+   notes and chart evidence, refresh journal records and the live catalog, save
+   the final per-trade charts and supported notes/tags/resources, and independently
+   verify persistence. Preserve imported financial fields and user drawings.
+
+"Capture journal" starts stage one. "Continue" or "continue capture journal"
+resumes stage two when a pending capture is established; do not infer a new day
+from a chart the user navigated to during the pause. A repeated start request
+must reuse/repair the pending annotations rather than duplicate them. Explicit
+requests to do both stages together may override the pause. A notes-stage
+handoff is deliberate and is not a claim that journal saving is complete.
+
+Use the available trading and TradingView MCP tools. Authorization remains scoped
+to these stages, not broker orders, commits, deployment, or unrelated history.
 
 ## Approved annotation rules
 
@@ -58,8 +80,10 @@ position bands, every note, every leader, and every anchor are clearly readable.
 Inspect each final PNG before accepting it; automatic placement and successful
 property read-back do not establish that the layout is clear.
 
-Use `workflows/journal-annotate.mjs` after the snapshot for the mechanical
-chart annotations. Review and adjust its PNG drafts before journal apply; its
+For stage one, create and retain the drawings with the TradingView MCP, using
+the workflow's retained-chart procedure. `workflows/journal-annotate.mjs` removes
+its own drawings after each screenshot, so it is a stage-two helper, not the
+stage-one handoff. Review and adjust its PNG drafts before journal apply; its
 automatic layout is not proof that every label is visually clear.
 
 If the workflow or required services are unavailable, name the dependency rather
