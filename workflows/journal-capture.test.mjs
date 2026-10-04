@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {planDay,validateReview,applyReview,snapshotDay,reviewTemplate} from './journal-capture.mjs';
+import {planDay,validateReview,applyReview,snapshotDay,reviewTemplate,entryCandleTime} from './journal-capture.mjs';
 const image=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=','base64');
 const trade={id:1,date:'9/23/2026',ticker:'SPY',type:'Put',time_frame:1,entry_candle:'07:10',time:'07:11:12',outcome:'Loss',profit_loss:-23,quantity:2,transactions:[
  {side:'BUY',quantity:1,price:1.2,filledTime:'2026-09-23T14:11:12.544Z'},
@@ -12,7 +12,7 @@ const trade={id:1,date:'9/23/2026',ticker:'SPY',type:'Put',time_frame:1,entry_ca
 ],notes:'<p>Original note</p>',tags:[],rr:null,has_chart:false};
 const groups=[{id:22,name:'Setup',selection_mode:'single'}];
 const tags=['a','b'].map(key=>({key,page_type:'journal',group_id:22}));
-const row=()=>({id:1,chart_reviewed:true,chart_context:{date:'2026-09-23',ticker:'AMEX:SPY',time_frame:1,entry_candle:'07:10'},chart_path:'test.png',chart_annotations:{position_tool:'short_position',position_entity_id:'position-1',first_entry_time:'2026-09-23T14:11:12.544Z',final_exit_time:'2026-09-23T14:15:28.963Z',position_start_rule:'first_entry_candle',position_end_rule:'mfe_low',position_start_candle_time:1790172660,position_end_candle_time:1790172840,position_entry_price:769.4,position_target_price:769.2,position_stop_price:769.9,stop_distance:0.5,view_preserved:true,resolution:'1',visible_range:{from:1790167560,to:1790177760},position_created_before_markers:true,markers_brought_to_front:true,transaction_markers:[
+const row=()=>({id:1,chart_reviewed:true,chart_context:{date:'2026-09-23',ticker:'AMEX:SPY',time_frame:1,entry_candle:'07:10'},chart_path:'test.png',chart_annotations:{position_tool:'short_position',position_entity_id:'position-1',first_entry_time:'2026-09-23T14:11:12.544Z',final_exit_time:'2026-09-23T14:15:28.963Z',position_start_rule:'stored_entry_candle',position_end_rule:'final_exit_candle',position_target_rule:'mfe_low',position_mfe_candle_time:1790172840,position_start_candle_time:1790172600,position_end_candle_time:1790172900,position_entry_price:769.4,position_target_price:769.2,position_stop_price:769.9,stop_distance:0.5,view_preserved:true,resolution:'1',visible_range:{from:1790167560,to:1790177760},position_created_before_markers:true,markers_brought_to_front:true,transaction_markers:[
  {transaction_index:0,entity_id:'marker-0',side:'BUY',quantity:1,price:1.2,filled_time:'2026-09-23T14:11:12.544Z',text:'BUY 1 @ $1.20'},
  {transaction_index:1,entity_id:'marker-1',side:'BUY',quantity:1,price:1.1,filled_time:'2026-09-23T14:14:38.755Z',text:'BUY 1 @ $1.10'},
  {transaction_index:2,entity_id:'marker-2',side:'SELL',quantity:2,price:0.9,filled_time:'2026-09-23T14:15:28.963Z',text:'SELL 2 @ $0.90'}
@@ -26,7 +26,7 @@ function mock({silent=false,extra=false}={}){
  else if(route==='/tags/')data=tags;
  else if(route==='/tags/groups')data=groups;
  else if(route.endsWith('/image'))data={chart:state.chart};
- else if(route.includes('/daily-notes/'))data={date:'2026-09-23',notes:'Daily note',external_resources:[]};
+ else if(route==='/journal/daily-notes')data=[{date:'9/22/2026',notes:'Other day',external_resources:[]},{date:'9/23/2026',notes:'Daily note',external_resources:[]}];
  else throw Error(route);
  return {ok:true,json:async()=>structuredClone(data)};
  };return {state,writes,request};
@@ -43,7 +43,10 @@ test('requires a verified position tool and one quantity label per transaction',
  const missing=row();delete missing.chart_annotations;assert.throws(()=>validateReview(missing,trade,tags,groups,trade.date),/annotations required/);
  const wrongTool=row();wrongTool.chart_annotations.position_tool='long_position';assert.throws(()=>validateReview(wrongTool,trade,tags,groups,trade.date),/Wrong position tool/);
  const wrongStart=row();wrongStart.chart_annotations.first_entry_time='2026-09-23T14:14:38.755Z';assert.throws(()=>validateReview(wrongStart,trade,tags,groups,trade.date),/First entry mismatch/);
- const wrongEndpoint=row();wrongEndpoint.chart_annotations.position_end_rule='final_exit_candle';assert.throws(()=>validateReview(wrongEndpoint,trade,tags,groups,trade.date),/endpoint rule/);
+ const fillCandleStart=row();fillCandleStart.chart_annotations.position_start_candle_time=1790172660;assert.throws(()=>validateReview(fillCandleStart,trade,tags,groups,trade.date),/match stored entry_candle/);
+ const wrongEndpoint=row();wrongEndpoint.chart_annotations.position_end_rule='mfe_low';assert.throws(()=>validateReview(wrongEndpoint,trade,tags,groups,trade.date),/endpoint rule/);
+ const earlyEnd=row();earlyEnd.chart_annotations.position_end_candle_time=1790172840;assert.throws(()=>validateReview(earlyEnd,trade,tags,groups,trade.date),/extend to the final exit candle/);
+ const wrongTarget=row();wrongTarget.chart_annotations.position_target_rule='mfe_high';assert.throws(()=>validateReview(wrongTarget,trade,tags,groups,trade.date),/target rule/);
  const wrongStop=row();wrongStop.chart_annotations.position_stop_price=769.8;assert.throws(()=>validateReview(wrongStop,trade,tags,groups,trade.date),/wrong price/);
  const wrongDistance=row();wrongDistance.chart_annotations.stop_distance=1;assert.throws(()=>validateReview(wrongDistance,trade,tags,groups,trade.date),/\$0\.50/);
  const missingMarker=row();missingMarker.chart_annotations.transaction_markers.pop();assert.throws(()=>validateReview(missingMarker,trade,tags,groups,trade.date),/Every transaction/);
@@ -54,17 +57,25 @@ test('requires a verified position tool and one quantity label per transaction',
  const zoom=row();zoom.chart_annotations.view_preserved=false;assert.throws(()=>validateReview(zoom,trade,tags,groups,trade.date),/view must be preserved/);
  const order=row();order.chart_annotations.markers_brought_to_front=false;assert.throws(()=>validateReview(order,trade,tags,groups,trade.date),/brought to front/);
 });
+test('stored entry candle resolves Pacific daylight and standard time without changing the stored field',()=>{
+ const summer={...trade,date:'2026-10-02',entry_candle:'06:41'};
+ const winter={...trade,date:'2026-12-02',entry_candle:'06:41'};
+ assert.equal(new Date(entryCandleTime(summer)*1000).toISOString(),'2026-10-02T13:41:00.000Z');
+ assert.equal(new Date(entryCandleTime(winter)*1000).toISOString(),'2026-12-02T14:41:00.000Z');
+ assert.equal(summer.entry_candle,'06:41');
+ assert.throws(()=>entryCandleTime({...trade,entry_candle:'25:00'}),/entry_candle required/);
+});
 test('uses direction-aware MFE for wins and losses',()=>{
  const longTrade={...trade,type:'Call'};
- const long=row();Object.assign(long.chart_annotations,{position_tool:'long_position',position_end_rule:'mfe_high',position_entry_price:769.4,position_target_price:769.8,position_stop_price:768.9});
+ const long=row();Object.assign(long.chart_annotations,{position_tool:'long_position',position_target_rule:'mfe_high',position_entry_price:769.4,position_target_price:769.8,position_stop_price:768.9});
  assert.doesNotThrow(()=>validateReview(long,longTrade,tags,groups,longTrade.date));
  const winTrade={...trade,outcome:'Win'};
- const win=row();win.chart_annotations.position_end_rule='mfe_low';
+ const win=row();win.chart_annotations.position_target_rule='mfe_low';
  assert.doesNotThrow(()=>validateReview(win,winTrade,tags,groups,winTrade.date));
 });
-test('supports sell-first option entries and anchors the first actual transaction',()=>{
+test('supports sell-first fills while the tool starts on the stored entry candle',()=>{
  const sellFirst={...trade,transactions:[{side:'SELL',quantity:1,price:.89,filledTime:'2026-09-23T14:11:12.544Z'},{side:'BUY',quantity:1,price:1.04,filledTime:'2026-09-23T14:12:12.544Z'}]};
- const review=row();review.chart_annotations.first_entry_time=sellFirst.transactions[0].filledTime;review.chart_annotations.final_exit_time=sellFirst.transactions[1].filledTime;
+ const review=row();review.chart_annotations.first_entry_time=sellFirst.transactions[0].filledTime;review.chart_annotations.final_exit_time=sellFirst.transactions[1].filledTime;review.chart_annotations.position_end_candle_time=1790172720;review.chart_annotations.position_mfe_candle_time=1790172720;
  review.chart_annotations.transaction_markers=[{transaction_index:0,entity_id:'marker-0',side:'SELL',quantity:1,price:.89,filled_time:sellFirst.transactions[0].filledTime,text:'SELL 1 @ $0.89'},{transaction_index:1,entity_id:'marker-1',side:'BUY',quantity:1,price:1.04,filled_time:sellFirst.transactions[1].filledTime,text:'BUY 1 @ $1.04'}];
  assert.doesNotThrow(()=>validateReview(review,sellFirst,tags,groups,sellFirst.date));
 });
@@ -100,14 +111,17 @@ test('snapshot directory cannot be reused',async()=>{
 });
 test('snapshot accepts a missing daily note without hiding other failures',async()=>{
  const parent=await fs.mkdtemp(path.join(os.tmpdir(),'journal-test-')),dir=path.join(parent,'run'),m=mock();
- const request=async(url,options={})=>url.includes('/daily-notes/')?{ok:false,status:404,json:async()=>null}:m.request(url,options);
- try{await snapshotDay('2026-09-23',dir,{...opts(m),request});const saved=JSON.parse(await fs.readFile(path.join(dir,'before.json'),'utf8'));assert.equal(saved.daily_note,null);}
+ const request=async(url,options={})=>url.endsWith('/daily-notes')?{ok:true,json:async()=>[]}:m.request(url,options);
+ try{await snapshotDay('2026-09-23',dir,{...opts(m),request});const saved=JSON.parse(await fs.readFile(path.join(dir,'before.json'),'utf8'));assert.equal(saved.daily_note,null);
+  const failed=async(url,options={})=>url.endsWith('/daily-notes')?{ok:false,status:500,json:async()=>null}:m.request(url,options);
+  await assert.rejects(snapshotDay('2026-09-23',path.join(parent,'failed'),{...opts(m),request:failed}),/500/);
+ }
  finally{await fs.rm(parent,{recursive:true,force:true});}
 });
 test('snapshot emits a prefilled, validator-shaped review template',async()=>{
  const template=reviewTemplate({...snapshot(),groups},'/tmp/run'),item=template.trades[0],marker=item.chart_annotations.transaction_markers[0];
  assert.equal(template.snapshot_path,'/tmp/run/before.json');assert.equal(item.chart_annotations.position_tool,'short_position');
- assert.equal(item.chart_annotations.position_end_rule,'mfe_low');assert.equal(marker.text,'BUY 1 @ $1.20');assert.deepEqual(item.group_review,{22:''});
+ assert.equal(item.chart_annotations.position_end_rule,'final_exit_candle');assert.equal(item.chart_annotations.position_target_rule,'mfe_low');assert.equal(marker.text,'BUY 1 @ $1.20');assert.deepEqual(item.group_review,{22:''});
 });
 test('template preserves malformed imported rows for explicit skipping',()=>{
  const malformed={...trade,transactions:[{side:'BUY',quantity:1,price:'bad',filledTime:'bad'}]};

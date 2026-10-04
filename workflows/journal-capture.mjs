@@ -19,6 +19,21 @@ export function planDay(trades,date) {
   date=isoDate(date);
   return trades.filter(t=>isoDate(t.date)===date && t.outcome!=='Miss').sort((a,b)=>String(a.entry_candle).localeCompare(String(b.entry_candle)) || a.id-b.id);
 }
+export function entryCandleTime(trade) {
+  const date = isoDate(trade.date);
+  const clock = String(trade.entry_candle || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) throw Error(`Trade ${trade.id}: valid stored entry_candle required`);
+  const desired = Date.parse(`${date}T${clock[1].padStart(2,'0')}:${clock[2]}:00Z`);
+  const formatter = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  let candidate = desired;
+  for (let i=0;i<3;i++) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(candidate)).map(p=>[p.type,p.value]));
+    const wallTime = Date.parse(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`);
+    if (wallTime === desired) return candidate / 1000;
+    candidate += desired - wallTime;
+  }
+  throw Error(`Trade ${trade.id}: stored entry_candle cannot be resolved in Pacific time`);
+}
 function expectedTransactions(trade) {
   return (trade.transactions||[]).map((transaction,index)=>({
     transaction,index,time:transactionTime(transaction.filledTime),
@@ -37,8 +52,10 @@ function annotationPlan(trade) {
   return {
     position_tool:positionTool,position_entity_id:'',
     first_entry_time:firstEntry?.transaction.filledTime||'',final_exit_time:finalExit?.transaction.filledTime||'',
-    position_start_rule:'first_entry_candle',
-    position_end_rule:positionTool==='short_position'?'mfe_low':'mfe_high',
+    position_start_rule:'stored_entry_candle',
+    position_end_rule:'final_exit_candle',
+    position_target_rule:positionTool==='short_position'?'mfe_low':'mfe_high',
+    position_mfe_candle_time:null,
     position_start_candle_time:null,position_end_candle_time:null,position_entry_price:null,position_target_price:null,position_stop_price:null,
     stop_distance:0.5,view_preserved:false,resolution:String(trade.time_frame),visible_range:null,
     position_created_before_markers:false,markers_brought_to_front:false,
@@ -91,9 +108,20 @@ function validateChartAnnotations(review,trade) {
   const firstEntry=transactions[0];
   if(transactionTime(annotations.first_entry_time)!==firstEntry.time)throw Error(`First entry mismatch: ${trade.id}`);
   if(transactionTime(annotations.final_exit_time)!==finalExit.time)throw Error(`Final exit mismatch: ${trade.id}`);
-  if(annotations.position_start_rule!=='first_entry_candle')throw Error(`Position tool must start on the first entry candle: ${trade.id}`);
-  const expectedEndRule=expectedTool==='short_position'?'mfe_low':'mfe_high';
-  if(annotations.position_end_rule!==expectedEndRule)throw Error(`Wrong position endpoint rule: ${trade.id}`);
+  if(annotations.position_start_rule!=='stored_entry_candle')throw Error(`Position tool must start on the stored entry_candle: ${trade.id}`);
+  const expectedStart = entryCandleTime(trade);
+  if (Number(annotations.position_start_candle_time)!==expectedStart) throw Error(`Position start must match stored entry_candle: ${trade.id}`);
+  if (expectedStart > Math.floor(firstEntry.time/60000)*60) throw Error(`Stored entry_candle follows the first fill: ${trade.id}`);
+  if(annotations.position_end_rule!=='final_exit_candle')throw Error(`Wrong position endpoint rule: ${trade.id}`);
+  const candleSeconds=Number(trade.time_frame)*60;
+  if(!Number.isFinite(candleSeconds)||candleSeconds<=0)throw Error(`Invalid minute timeframe: ${trade.id}`);
+  const expectedEnd=Math.floor(finalExit.time/1000/candleSeconds)*candleSeconds;
+  if(Number(annotations.position_end_candle_time)!==expectedEnd)throw Error(`Position tool must extend to the final exit candle: ${trade.id}`);
+  const expectedTargetRule=expectedTool==='short_position'?'mfe_low':'mfe_high';
+  if(annotations.position_target_rule!==expectedTargetRule)throw Error(`Wrong position target rule: ${trade.id}`);
+  const mfeTime=annotations.position_mfe_candle_time;
+  const firstFillCandle=Math.floor(firstEntry.time/1000/candleSeconds)*candleSeconds;
+  if(!Number.isFinite(mfeTime)||mfeTime<firstFillCandle||mfeTime>expectedEnd||mfeTime%candleSeconds!==0)throw Error(`MFE candle must be within the actual fill window: ${trade.id}`);
   for(const key of ['position_start_candle_time','position_end_candle_time','position_entry_price','position_target_price','position_stop_price']){
     if(!Number.isFinite(Number(annotations[key])))throw Error(`Position geometry requires ${key}: ${trade.id}`);
   }
@@ -130,8 +158,13 @@ const png = b => b.length>8 && b.subarray(0,8).equals(Buffer.from([137,80,78,71,
 export async function snapshotDay(date,dir,{base,request=fetch}={}) {
   const api=client(base,request);
   date=isoDate(date);
-  const dailyRoute=`/journal/daily-notes/${date}`;
-  const dailyRead=(async()=>{const response=await request(base+dailyRoute,{signal:AbortSignal.timeout(20000)});if(response.status===404)return null;if(!response.ok)throw Error(`Read failed: ${dailyRoute} HTTP ${response.status}`);return response.json();})();
+  // The backend exposes a daily-note collection for reads; the dated route is PUT-only.
+  const dailyRead=api('/journal/daily-notes').then(notes=>{
+    if(!Array.isArray(notes))throw Error('Daily notes response must be an array');
+    const matches=notes.filter(note=>isoDate(note.date)===date);
+    if(matches.length>1)throw Error(`Duplicate daily notes for ${date}`);
+    return matches[0]||null;
+  });
   const [all,tags,groups,daily_note]=await Promise.all([api('/journal/'),api('/tags/?page_type=journal'),api('/tags/groups?page_type=journal'),dailyRead]);
   const trades=planDay(all,date); const chart_hashes={};
   await fs.mkdir(path.dirname(path.resolve(dir)),{recursive:true});

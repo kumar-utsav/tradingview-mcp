@@ -42,9 +42,10 @@ page/record before continuing.
 
 For each row, prefer the pane matching its underlying ticker and stored
 `time_frame`; the active pane may be SPX or another timeframe. The stored
-`entry_candle` identifies context but uses the bookmarklet convention (the candle
-before the fill bucket, so a 07:11:12 fill may store 07:10). Do not rewrite it.
-Actual fill times control transaction markers and the position tool.
+`entry_candle` controls the position tool's start and uses the bookmarklet
+convention (the candle before the fill bucket, so a 07:11:12 fill may store
+07:10). Do not rewrite it or substitute the fill candle. Actual fill times
+control transaction markers and the MFE search window.
 
 View the saved chart first. If missing, stale, mismatched, or inadequate, navigate
 to the matching historical session at the preserved zoom and capture enough
@@ -91,8 +92,10 @@ visible range. If replay is active before the final fill, advance replay first;
 the script checks this before changing the chart. All rows in one run currently
 need the same minute timeframe. Inspect `annotation-draft.json`, the prefilled
 `review.draft.json`, every PNG, and every skip. The
-script places labels around candle bodies using screen coordinates, but a person
-must still check overlaps, clipping, indicator conflicts, and trade context.
+script places 16-point labels and diagonal leaders using screen coordinates,
+checks their paths against candles, and reserves clearance around all fill
+anchors. Visual review must still check overlaps, clipping, indicator conflicts,
+anchor visibility, and trade context.
 Correct a draft by hand before marking `overlap_checked` and
 `screenshot_after_annotations` true in `review.json`; the script never sets
 those review booleans or saves to the journal app.
@@ -101,33 +104,58 @@ Work one row at a time so run-created annotations never overlap another trade.
 For each row, using a chronological copy of all imported transactions:
 
 1. Create one `long_position` for a Call or `short_position` for a Put. Start on
-   the candle containing the first actual entry; anchor a long at its underlying
-   HIGH and a short at its underlying LOW. Option prices are never chart Y-values.
+   the stored `entry_candle` on the trade's date in Pacific time; anchor a long at
+   that candle's underlying HIGH and a short at its underlying LOW. The stored
+   field is authoritative; if missing or not loaded, skip rather than guess.
+   Option prices are never chart Y-values.
 2. The tool spans the entire row. Find the final closing fill that returns the
-   position to flat. If the ledger never returns to flat, skip with that reason.
-3. For every outcome, the position-tool endpoint is the maximum favorable
-   excursion from first entry through final exit inclusive—lowest LOW for a
-   short, highest HIGH for a long; for ties use the first after entry. Never
-   search past the final exit and never substitute the final exit merely because
-   the trade was a win or break-even. This endpoint is required so the tool
+   position to flat and extend the tool's right edge to that fill's candle. If
+   the ledger never returns to flat, skip with that reason. An earlier MFE candle
+   controls the target price only; it must never shorten the tool's width.
+3. For every outcome, the position-tool target price is the maximum favorable
+   excursion from the first actual fill candle through final exit inclusive:
+   lowest LOW for a short, highest HIGH for a long; for ties use the first candle
+   in that window. Never
+   search past the final exit and never substitute its price for MFE merely because
+   the trade was a win or break-even. This target is required so the tool
    shows how far the trade traveled and makes its potential risk-to-reward
-   visible.
+   visible. Record the MFE candle separately as `position_mfe_candle_time`, use
+   `position_end_rule: final_exit_candle` for duration, and use
+   `position_target_rule: mfe_low|mfe_high` for the target level.
 4. Display stop: exactly $0.50 adverse on the underlying (short `entry + .50`,
    long `entry - .50`). The stop is fixed for every outcome and does not
    establish planned risk or RR.
+   TradingView `stopLevel` and `profitLevel` use tick counts: divide the price
+   distances by the underlying's `minmov / pricescale` (SPY $0.50 = 50 ticks).
+   Preserve fractional tick counts when historical candles contain sub-cent
+   prices; do not round the actual entry or MFE level to whole ticks.
+   Convert the read-back ticks to stop/target prices and verify both bands expand
+   visibly to those prices before accepting the PNG; matching raw overrides
+   alone is insufficient.
 5. After the position tool, mark every fill on its actual `filledTime` candle.
    Each callout line is `BUY|SELL quantity @ $price` with two decimals, using the
-   imported option price (for example `BUY 2 @ $0.95`). Same-side fills in one
+   imported option price (for example `BUY 2 @ $0.95`). Use 16-point white text,
+   a content-sized green BUY or red SELL background, and no added timestamp.
+   Same-side fills in one
    bucket may share a multiline callout only if every complete line is readable;
    opposite sides remain distinct.
 6. Anchor callouts to candle high/low plus a small offset and leader line. Bring
    every callout to front above the position tool and all run-created marks.
+   Use diagonal leaders starting just outside the high/low wick, and check the
+   whole leader against candle bodies, wicks, and other notes. A clear note box
+   alone does not prove a clear leader; vertical leaders through candles fail
+   review.
+   Reserve clearance around every fill anchor, including fills not yet labeled.
+   No note or other fill's leader may cover an anchor. Account for the rendered
+   text extending right/down from its placement point, rather than treating
+   notes as centered boxes.
 
 Use vertical lanes for nearby fills. Reposition annotations—not the chart—until
 labels, bands, candles, and exit are unclipped, unambiguous, and collision-free.
 Before the PNG, read drawings back and confirm tool type, entity IDs, start/end
 candles and prices, $0.50 stop, every marker's text/anchor, visual order, and no
-overlap. Capture only then, record the evidence in `chart_annotations`, remove
+overlap. Inspect each anchor independently: it must remain visible and its
+leader must trace clearly to exactly one note. Capture only then, record the evidence in `chart_annotations`, remove
 only that row's temporary marks, and continue. Every screenshot uses the same
 original resolution/range. A combined day view is optional and needs separate
 trade-ID lanes.
@@ -144,7 +172,7 @@ arbitrary tag count and never copy backtest-only tags. Give concrete evidence fo
 each selected tag.
 
 Keep decisions separate: Setup Review is valid/planned-momentum-exception/
-invalid/unclear; Entry Execution is planned/justified structural adjustment/
+invalid; Entry Execution is planned/justified structural adjustment/
 unplanned; Trade Management is planned/justified adjustment/fear exit/held past
 invalidation/unknown. Outcome alone proves none of them. Read stored HTML as text
 without rewriting it. Intent/emotion may come from a note when attributed; do not
@@ -152,6 +180,11 @@ append generated analysis as the user's note. FOMO,
 chasing, P/L decisions, thesis/risk violations, fear exits, and holding past
 invalidation need specific evidence. Size alone does not prove a risk violation.
 Preserve existing tags unless explicit contrary evidence supports removal.
+
+When evidence is insufficient, leave that group's tags unselected and explain
+the uncertainty in `group_review`. The user removed the `j_setup_unclear`
+("Cannot assess") tag from all trades and the catalog; never recreate or apply
+it as an uncertainty fallback.
 
 For positional ranges use the entry anchor HIGH for Call and LOW for Put against
 completed, correctly dated bounds: premarket 01:00-06:30 Pacific, previous regular

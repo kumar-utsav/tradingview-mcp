@@ -7,10 +7,11 @@ import { status as replayStatus } from '../src/core/replay.js';
 import { getOhlcv } from '../src/core/data.js';
 import { drawShape, getProperties, removeOne, setVisualOrder } from '../src/core/drawing.js';
 import { captureScreenshot } from '../src/core/capture.js';
-import { reviewTemplate } from './journal-capture.mjs';
+import { reviewTemplate, entryCandleTime } from './journal-capture.mjs';
 
 const CHART = 'window.TradingViewApi._activeChartWidgetWV.value()';
 const STOP = 0.5;
+const FILL_FONT_SIZE = 16;
 const round = n => Math.round(n * 1e8) / 1e8;
 const bucket = (milliseconds, seconds) => Math.floor(milliseconds / 1000 / seconds) * seconds;
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -35,8 +36,10 @@ export function planAnnotation(trade, bars, resolution) {
   if (open !== 0 || !final) throw Error(`Trade ${trade.id}: final flat exit is missing`);
   const firstTime = bucket(fills[0].millis, seconds);
   const lastTime = bucket(final.millis, seconds);
+  const entryTime = entryCandleTime(trade);
+  if (entryTime > firstTime || entryTime % seconds !== 0) throw Error(`Trade ${trade.id}: stored entry_candle is after the first fill or is not aligned to the chart timeframe`);
   const byTime = new Map(bars.map(bar => [Number(bar.time), bar]));
-  const entry = byTime.get(firstTime);
+  const entry = byTime.get(entryTime);
   if (!entry || !byTime.has(lastTime)) throw Error(`Trade ${trade.id}: entry or final exit candle is not loaded`);
   const window = bars.filter(bar => bar.time >= firstTime && bar.time <= lastTime).sort((a, b) => a.time - b.time);
   if (window.length !== (lastTime - firstTime) / seconds + 1) throw Error(`Trade ${trade.id}: candle history has a gap during the trade`);
@@ -51,8 +54,9 @@ export function planAnnotation(trade, bars, resolution) {
     id: trade.id, symbol: trade.ticker, resolution: String(resolution),
     position_tool: short ? 'short_position' : 'long_position',
     first_entry_time: fills[0].filled_time, final_exit_time: final.filled_time,
-    start: { time: firstTime, price: entryPrice },
-    end: { time: mfe.time, price: target },
+    start: { time: entryTime, price: entryPrice },
+    end: { time: lastTime, price: target },
+    mfe: { time: mfe.time, price: target },
     stop_price: stop, stop_distance: STOP,
     fills: fills.map(fill => {
       const time = bucket(fill.millis, seconds);
@@ -97,40 +101,101 @@ function intersects(a, b) {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
+export function segmentIntersectsBox(start, end, box) {
+  let from = 0, to = 1;
+  for (const [axis, low, high] of [['x', box.left, box.right], ['y', box.top, box.bottom]]) {
+    const delta = end[axis] - start[axis];
+    if (delta === 0) {
+      if (start[axis] < low || start[axis] > high) return false;
+      continue;
+    }
+    const a = (low - start[axis]) / delta, b = (high - start[axis]) / delta;
+    from = Math.max(from, Math.min(a, b));
+    to = Math.min(to, Math.max(a, b));
+    if (from > to) return false;
+  }
+  return true;
+}
+
 // Lay out the labels in screen pixels so a change in price scale does not make
 // them enormous or push them over candles. Each label stays close to its fill.
 export function placeLabels(plan, geometry) {
-  const occupied = [];
   const visible = geometry.bars.filter(b => b.x >= 0 && b.x <= geometry.width);
   if (!visible.length) throw Error(`Trade ${plan.id}: no visible candles`);
-  const placements = [];
-  for (const fill of plan.fills) {
+  const gaps = visible.slice(1).map((bar, i) => Math.abs(bar.x - visible[i].x)).filter(n => n > 0).sort((a, b) => a - b);
+  const candleHalfWidth = Math.min(5, (gaps[Math.floor(gaps.length / 2)] || 10) * .3) + 3;
+  const candleBoxes = visible.map(bar => ({left:bar.x-candleHalfWidth,right:bar.x+candleHalfWidth,top:bar.highY-3,bottom:bar.lowY+3}));
+  // Reserve all fill anchors before placing the first note, including later fills.
+  const anchorClearance = plan.fills.flatMap(fill => {
+    const bar = visible.find(item => item.time === fill.time);
+    return bar ? [bar.highY-8,bar.lowY+8].map(y => ({
+      time:fill.time,left:bar.x-14,right:bar.x+14,top:y-14,bottom:y+14,
+    })) : [];
+  });
+  function candidates(fill, distances, reach) {
     const anchor = geometry.bars.find(b => b.time === fill.time);
     if (!anchor || anchor.x < 8 || anchor.x > geometry.width - 8) throw Error(`Trade ${plan.id}: fill ${fill.transaction_index} is outside the visible chart`);
-    const anchorY = anchor.lowY;
-    const width = Math.ceil(fill.text.length * 5.8 + 16);
-    const height = 20;
-    let best = null;
+    const width = Math.ceil(fill.text.length * FILL_FONT_SIZE * 0.6 + 16);
+    const height = FILL_FONT_SIZE + 10;
+    const found = [];
     for (const sign of [1, -1]) {
-      for (const dy of [70, 95, 120, 145, 170]) {
+      const anchorY = sign === 1 ? anchor.lowY + 8 : anchor.highY - 8;
+      for (const dy of distances) {
         for (const near of visible) {
           const dx = near.x - anchor.x;
-          if (Math.abs(dx) > 190) continue;
+          if (Math.abs(dx) < 40 || Math.abs(dx) > reach) continue;
           const y = anchorY + sign * dy;
-          const box = { left: near.x - width / 2, right: near.x + width / 2, top: y - height / 2, bottom: y + height / 2 };
+          const leaderStart = {x:anchor.x,y:anchorY}, leaderEnd = {x:near.x,y};
+          // TradingView text starts at its point and extends right/down; it is
+          // not centered on that point. Keep a small conservative padding.
+          const box = { left: near.x-4, right: near.x+width, top: y-4, bottom: y+height };
           if (box.left < 10 || box.right > geometry.width - 10 || box.top < 14 || box.bottom > geometry.height - 24) continue;
-          if (occupied.some(other => intersects(box, other))) continue;
+          if (anchorClearance.some(other => intersects(box, other))) continue;
           if (visible.some(bar => bar.x >= box.left - 5 && bar.x <= box.right + 5 && bar.highY <= box.bottom + 5 && bar.lowY >= box.top - 5)) continue;
+          if (candleBoxes.some(obstacle => segmentIntersectsBox(leaderStart, leaderEnd, obstacle))) continue;
+          // Neighboring candles can be less than 14px apart at the user's zoom.
+          // Keep the full 14px exclusion for note boxes, but protect the actual
+          // connector endpoints with a smaller radius so adjacent anchors do not
+          // make every possible leader fail merely at its own starting point.
+          if (anchorClearance.some(other => other.time !== fill.time && segmentIntersectsBox(leaderStart, leaderEnd, {
+            left:(other.left+other.right)/2-6,right:(other.left+other.right)/2+6,
+            top:(other.top+other.bottom)/2-6,bottom:(other.top+other.bottom)/2+6,
+          }))) continue;
           const score = Math.hypot(dx, dy) + (sign === 1 ? 0 : 35);
-          if (!best || score < best.score) best = { time: near.time, x: near.x, y, box, score };
+          found.push({ ...fill, anchor:{time:fill.time,x:anchor.x,y:anchorY},
+            label:{time:near.time,x:near.x,y},bounds:box,score });
         }
       }
     }
-    if (!best) throw Error(`Trade ${plan.id}: no clear label space for fill ${fill.transaction_index}`);
-    occupied.push(best.box);
-    placements.push({ ...fill, anchor: { time: fill.time, y: anchorY }, label: { time: best.time, y: best.y }, bounds: best.box });
+    return found.sort((a,b)=>a.score-b.score);
   }
-  return placements;
+  // Choose the entire cluster together: a greedy early note can occupy the only
+  // safe lane for a later fill, even though another complete layout exists.
+  for(const search of [{distances:[70,95,120,145,170],reach:190},
+    {distances:[45,70,95,120,145,170,195,220],reach:250}]) {
+    const options=plan.fills.map(fill=>candidates(fill,search.distances,search.reach));
+    if(options.some(list=>!list.length))continue;
+    const order=options.map((list,index)=>({index,count:list.length})).sort((a,b)=>a.count-b.count);
+    const selected=new Array(plan.fills.length),chosen=[];
+    let visits=0;
+    function choose(depth) {
+      if(depth===order.length)return true;
+      if(++visits>50000)return false;
+      const index=order[depth].index;
+      for(const note of options[index]) {
+        if(chosen.some(other=>intersects(note.bounds,other.bounds)||
+          segmentIntersectsBox(note.anchor,note.label,other.bounds)||
+          segmentIntersectsBox(other.anchor,other.label,note.bounds)))continue;
+        selected[index]=note;chosen.push(note);
+        if(choose(depth+1))return true;
+        chosen.pop();
+        if(visits>50000)break;
+      }
+      return false;
+    }
+    if(choose(0))return selected;
+  }
+  throw Error(`Trade ${plan.id}: no jointly clear label layout at the preserved zoom`);
 }
 
 async function pixelPrices(placements) {
@@ -151,20 +216,56 @@ async function assertDrawing(id, name, point) {
   return shape;
 }
 
+export function positionToolLevels(plan, tickSize) {
+  if (!Number.isFinite(tickSize) || tickSize <= 0) throw Error('Position tool requires the underlying tick size');
+  // TradingView's stopLevel/profitLevel are tick counts, not price distances.
+  // Historical candles can contain sub-cent trades. Fractional tick counts are
+  // supported by the drawing API; preserve the actual price instead of rounding.
+  const stopLevel = round(Math.abs(plan.start.price - plan.stop_price) / tickSize);
+  const profitLevel = round(Math.abs(plan.end.price - plan.start.price) / tickSize);
+  if (Math.abs(stopLevel * tickSize - STOP) > 1e-6 ||
+      Math.abs(profitLevel * tickSize - Math.abs(plan.end.price - plan.start.price)) > 1e-6) {
+    throw Error(`Trade ${plan.id}: position levels cannot be represented at the underlying tick size`);
+  }
+  return { stopLevel, profitLevel };
+}
+
+export function validatePositionPrices(plan, drawing, tickSize) {
+  const short = plan.position_tool === 'short_position';
+  const entry = Number(drawing.points?.[0]?.price);
+  const stopTicks = Number(drawing.properties?.stopLevel);
+  const profitTicks = Number(drawing.properties?.profitLevel);
+  const stop = entry + (short ? 1 : -1) * stopTicks * tickSize;
+  const target = entry + (short ? -1 : 1) * profitTicks * tickSize;
+  if (![entry, stopTicks, profitTicks, stop, target].every(Number.isFinite) ||
+      Math.abs(entry - plan.start.price) > 1e-6 ||
+      Math.abs(stop - plan.stop_price) > 1e-6 || Math.abs(target - plan.end.price) > 1e-6 ||
+      Number(drawing.points?.[1]?.time) !== plan.end.time) {
+    throw Error(`Trade ${plan.id}: rendered position stop/target prices did not read back`);
+  }
+  return { stop, target };
+}
+
 async function renderTrade(plan, outputDir) {
   const created = [];
   try {
     const geometry = await chartGeometry();
+    const entryBar = geometry.bars.find(bar => bar.time === plan.start.time);
+    if (!entryBar || entryBar.x < 0 || entryBar.x > geometry.width) throw Error(`Trade ${plan.id}: stored entry_candle is outside the preserved view`);
     const placements = placeLabels(plan, geometry);
     await pixelPrices(placements);
-    const profit = round(Math.abs(plan.start.price - plan.end.price));
+    const tickSize = await evaluate(`(function() {
+      var info=${CHART}._chartWidget.model().mainSeries().symbolInfo();
+      return info && Number(info.minmov) / Number(info.pricescale);
+    })()`);
+    const levels = positionToolLevels(plan, tickSize);
     const position = await drawShape({shape:plan.position_tool,point:plan.start,
       point2:{time:plan.end.time,price:plan.start.price},
-      overrides:JSON.stringify({stopLevel:STOP,profitLevel:profit,compact:true,fontsize:10})});
+      overrides:JSON.stringify({...levels,compact:true,fontsize:10})});
     if (!position.entity_id) throw Error(`Trade ${plan.id}: position tool has no ID`);
     created.push(position.entity_id);
     const positionRead = await assertDrawing(position.entity_id,plan.position_tool,plan.start);
-    if (Math.abs(Number(positionRead.properties?.stopLevel)-STOP)>1e-8 || Math.abs(Number(positionRead.properties?.profitLevel)-profit)>1e-8 || Number(positionRead.points[1]?.time)!==plan.end.time) throw Error(`Trade ${plan.id}: position levels did not read back`);
+    validatePositionPrices(plan, positionRead, tickSize);
     const markers=[];
     for (const p of placements) {
       const color=p.side==='BUY'?'#218838':'#C62828';
@@ -173,11 +274,11 @@ async function renderTrade(plan, outputDir) {
       created.push(leader.entity_id);
       await assertDrawing(leader.entity_id,'trend_line',{time:p.anchor.time,price:p.anchor.price});
       const label=await drawShape({shape:'text',point:{time:p.label.time,price:p.label.price},text:p.text,
-        overrides:JSON.stringify({color:'#ffffff',backgroundColor:color,fillBackground:true,backgroundTransparency:0,drawBorder:false,wordWrap:false,fontsize:10,bold:false})});
+        overrides:JSON.stringify({color:'#ffffff',backgroundColor:color,fillBackground:true,backgroundTransparency:0,drawBorder:false,wordWrap:false,fontsize:FILL_FONT_SIZE,bold:false})});
       if (!label.entity_id) throw Error(`Trade ${plan.id}: text label has no ID`);
       created.push(label.entity_id);
       const labelRead=await assertDrawing(label.entity_id,'text',{time:p.label.time,price:p.label.price});
-      if (labelRead.properties?.text!==p.text || labelRead.properties?.wordWrap!==false || labelRead.properties?.backgroundColor!==color) throw Error(`Trade ${plan.id}: label text or style did not read back`);
+      if (labelRead.properties?.text!==p.text || labelRead.properties?.wordWrap!==false || labelRead.properties?.backgroundColor!==color || Number(labelRead.properties?.fontsize)!==FILL_FONT_SIZE) throw Error(`Trade ${plan.id}: label text or style did not read back`);
       await setVisualOrder({entity_id:label.entity_id,action:'bring_to_front'});
       markers.push({transaction_index:p.transaction_index,entity_id:label.entity_id,leader_entity_id:leader.entity_id,
         side:p.side,quantity:p.quantity,price:p.price,filled_time:p.filled_time,text:p.text,
@@ -188,8 +289,11 @@ async function renderTrade(plan, outputDir) {
     await fs.copyFile(shot.file_path,destination,fs.constants.COPYFILE_EXCL);
     const view=(await getVisibleRange()).visible_range;
     return {id:plan.id,chart_path:destination,position_entity_id:position.entity_id,position_start_candle_time:plan.start.time,
-      position_end_candle_time:plan.end.time,position_entry_price:plan.start.price,position_target_price:plan.end.price,
-      position_stop_price:plan.stop_price,stop_distance:STOP,resolution:plan.resolution,visible_range:view,transaction_markers:markers,
+      position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,
+      position_entry_price:plan.start.price,position_target_price:plan.end.price,
+      position_stop_price:plan.stop_price,stop_distance:STOP,position_tick_size:tickSize,
+      position_stop_ticks:levels.stopLevel,position_profit_ticks:levels.profitLevel,
+      resolution:plan.resolution,visible_range:view,transaction_markers:markers,
       layout_automated:true,visual_review_required:true};
   } finally {
     for (const id of created.reverse()) await removeOne({entity_id:id});
@@ -206,6 +310,7 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
       position_entity_id:result.position_entity_id,
       position_start_candle_time:result.position_start_candle_time,
       position_end_candle_time:result.position_end_candle_time,
+      position_mfe_candle_time:result.position_mfe_candle_time,
       position_entry_price:result.position_entry_price,
       position_target_price:result.position_target_price,
       position_stop_price:result.position_stop_price,

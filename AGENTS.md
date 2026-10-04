@@ -147,3 +147,19 @@ verification before reporting completion. The dated reference is
 These two personal skills are linked from `/Users/utsav/.agents/skills/`, so
 requests can originate in any local Codex project. Resolve their relative
 commands and run artifacts from `/Users/utsav/Projects/tradingview-mcp`.
+
+## Temporary work and cleanup
+
+Keep disposable audits, preview servers, ad hoc validation scripts, debug
+screenshots, and trial captures in the operating system's temporary directory,
+outside this checkout. Do not leave them as local project changes.
+
+After verification completes, stop temporary preview processes and remove the
+task's disposable files, superseded drafts, and temporary worktrees. Retain
+useful code and skill changes, meaningful regression tests and their fixtures,
+requested final artifacts, and completed capture records. Preserve recovery
+files while work is incomplete or a saved result remains unverified.
+
+Review changes individually during cleanup; never reset the checkout or discard
+useful work merely to make Git status clean. Cleanup does not authorize a
+commit, push, or deployment.
