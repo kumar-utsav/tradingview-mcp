@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {planDay,validateReview,applyReview,snapshotDay,reviewTemplate,entryCandleTime} from './journal-capture.mjs';
+import {planDay,validateReview,applyReview,snapshotDay,reviewTemplate,entryCandleTime,positionRR,parsePositionRRLabel} from './journal-capture.mjs';
 const image=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=','base64');
 const trade={id:1,date:'9/23/2026',ticker:'SPY',type:'Put',time_frame:1,entry_candle:'07:10',time:'07:11:12',outcome:'Loss',profit_loss:-23,quantity:2,transactions:[
  {side:'BUY',quantity:1,price:1.2,filledTime:'2026-09-23T14:11:12.544Z'},
@@ -12,11 +12,11 @@ const trade={id:1,date:'9/23/2026',ticker:'SPY',type:'Put',time_frame:1,entry_ca
 ],notes:'<p>Original note</p>',tags:[],rr:null,has_chart:false};
 const groups=[{id:22,name:'Setup',selection_mode:'single'}];
 const tags=['a','b'].map(key=>({key,page_type:'journal',group_id:22}));
-const row=()=>({id:1,chart_reviewed:true,chart_context:{date:'2026-09-23',ticker:'AMEX:SPY',time_frame:1,entry_candle:'07:10'},chart_path:'test.png',chart_annotations:{position_tool:'short_position',position_entity_id:'position-1',first_entry_time:'2026-09-23T14:11:12.544Z',final_exit_time:'2026-09-23T14:15:28.963Z',position_start_rule:'stored_entry_candle',position_end_rule:'final_exit_candle',position_target_rule:'mfe_low',position_mfe_candle_time:1790172840,position_start_candle_time:1790172600,position_end_candle_time:1790172900,position_entry_price:769.4,position_target_price:769.2,position_stop_price:769.9,stop_distance:0.5,view_preserved:true,resolution:'1',visible_range:{from:1790167560,to:1790177760},position_created_before_markers:true,markers_brought_to_front:true,transaction_markers:[
+const row=()=>({id:1,chart_reviewed:true,chart_context:{date:'2026-09-23',ticker:'AMEX:SPY',time_frame:1,entry_candle:'07:10'},chart_path:'test.png',chart_annotations:{position_tool:'short_position',position_entity_id:'position-1',position_rr:{entity_id:'position-1',source:'tradingview_position_tool_label',label:'Risk/reward ratio: 0.4',compact:false,value:0.4},first_entry_time:'2026-09-23T14:11:12.544Z',final_exit_time:'2026-09-23T14:15:28.963Z',position_start_rule:'stored_entry_candle',position_end_rule:'final_exit_candle',position_target_rule:'mfe_low',position_mfe_candle_time:1790172840,position_start_candle_time:1790172600,position_end_candle_time:1790172900,position_entry_price:769.4,position_target_price:769.2,position_stop_price:769.9,stop_distance:0.5,view_preserved:true,resolution:'1',visible_range:{from:1790167560,to:1790177760},position_created_before_markers:true,markers_brought_to_front:true,transaction_markers:[
  {transaction_index:0,entity_id:'marker-0',side:'BUY',quantity:1,price:1.2,filled_time:'2026-09-23T14:11:12.544Z',text:'BUY 1 @ $1.20'},
  {transaction_index:1,entity_id:'marker-1',side:'BUY',quantity:1,price:1.1,filled_time:'2026-09-23T14:14:38.755Z',text:'BUY 1 @ $1.10'},
  {transaction_index:2,entity_id:'marker-2',side:'SELL',quantity:2,price:0.9,filled_time:'2026-09-23T14:15:28.963Z',text:'SELL 2 @ $0.90'}
-],overlap_checked:true,screenshot_after_annotations:true},tags:['a'],evidence:{a:'Specific chart evidence'},group_review:{22:'Reviewed setup'}});
+],overlap_checked:true,screenshot_after_annotations:true},rr:0.4,rr_evidence:'Position position-1 label: Risk/reward ratio: 0.4.',tags:['a'],evidence:{a:'Specific chart evidence'},group_review:{22:'Reviewed setup'}});
 const snapshot=()=>({date:'2026-09-23',trades:[structuredClone(trade)],chart_hashes:{1:null}});
 function mock({silent=false,extra=false}={}){
  const state=structuredClone(trade),writes=[];
@@ -67,7 +67,7 @@ test('stored entry candle resolves Pacific daylight and standard time without ch
 });
 test('uses direction-aware MFE for wins and losses',()=>{
  const longTrade={...trade,type:'Call'};
- const long=row();Object.assign(long.chart_annotations,{position_tool:'long_position',position_target_rule:'mfe_high',position_entry_price:769.4,position_target_price:769.8,position_stop_price:768.9});
+ const long=row();Object.assign(long.chart_annotations,{position_tool:'long_position',position_target_rule:'mfe_high',position_entry_price:769.4,position_target_price:769.8,position_stop_price:768.9});long.rr=0.8;long.chart_annotations.position_rr.value=0.8;long.chart_annotations.position_rr.label='Risk/reward ratio: 0.8';
  assert.doesNotThrow(()=>validateReview(long,longTrade,tags,groups,longTrade.date));
  const winTrade={...trade,outcome:'Win'};
  const win=row();win.chart_annotations.position_target_rule='mfe_low';
@@ -79,6 +79,26 @@ test('supports sell-first fills while the tool starts on the stored entry candle
  review.chart_annotations.transaction_markers=[{transaction_index:0,entity_id:'marker-0',side:'SELL',quantity:1,price:.89,filled_time:sellFirst.transactions[0].filledTime,text:'SELL 1 @ $0.89'},{transaction_index:1,entity_id:'marker-1',side:'BUY',quantity:1,price:1.04,filled_time:sellFirst.transactions[1].filledTime,text:'BUY 1 @ $1.04'}];
  assert.doesNotThrow(()=>validateReview(review,sellFirst,tags,groups,sellFirst.date));
 });
+test('RR comes from the matched tool label, including zero, with no geometry recalculation',()=>{
+ const valid=row();
+ assert.equal(positionRR(valid.chart_annotations),0.4);
+ for(const rr of [undefined,null,NaN,-1,2]){
+  const r={...row(),rr};assert.throws(()=>validateReview(r,trade,tags,groups,trade.date),/RR/);
+ }
+ const unsupported={...row(),rr_evidence:''};assert.throws(()=>validateReview(unsupported,trade,tags,groups,trade.date),/RR/);
+ for(const change of [undefined,{...valid.chart_annotations.position_rr,entity_id:'other-tool'},{...valid.chart_annotations.position_rr,source:'calculated'},{...valid.chart_annotations.position_rr,value:9}]){
+  const r=row();r.chart_annotations.position_rr=change;assert.throws(()=>validateReview(r,trade,tags,groups,trade.date),/RR/);
+ }
+ const zero=row();zero.chart_annotations.position_target_price=zero.chart_annotations.position_entry_price;zero.rr=0;
+ zero.chart_annotations.position_rr.value=0;zero.chart_annotations.position_rr.label='Risk/reward ratio: 0';
+ assert.doesNotThrow(()=>validateReview(zero,trade,tags,groups,trade.date));
+ // Native tool display can differ from an independent calculation (tick rounding).
+ const native=row();native.rr=0.39;native.chart_annotations.position_rr.value=0.39;native.chart_annotations.position_rr.label='Risk/reward ratio: 0.39';
+ assert.doesNotThrow(()=>validateReview(native,trade,tags,groups,trade.date));
+ assert.equal(parsePositionRRLabel('Risk/reward ratio: 2.86'),2.86);
+ assert.equal(parsePositionRRLabel('Qty: 100\n2,86',true),2.86);
+ assert.throws(()=>parsePositionRRLabel('Qty: 100'),/RR/);
+});
 test('rejects unknown tags, conflicting selections and unsupported removals',()=>{
  const r=row();r.tags=['a','b'];r.evidence.b='evidence';assert.throws(()=>validateReview(r,trade,tags,groups,trade.date),/Conflicting/);
  r.tags=['bt_invalid'];assert.throws(()=>validateReview(r,trade,tags,groups,trade.date),/Not a journal tag/);
@@ -88,7 +108,7 @@ test('dry run does not write; apply preserves imported data and notes, verifies 
  const m=mock(),r={...row(),notes_append:'Chart note <literal>',notes_source:'Matching drawing ID 42'};
  const manifest={trades:[r]};await applyReview(manifest,snapshot(),opts(m));assert.equal(m.writes.length,0);
  const result=await applyReview(manifest,snapshot(),{...opts(m),apply:true});assert.equal(result.complete,true);
- assert.deepEqual(m.writes.map(w=>w.propName),['chart','tags','notes']);assert.equal(m.state.profit_loss,-23);assert.deepEqual(m.state.transactions,trade.transactions);
+ assert.deepEqual(m.writes.map(w=>w.propName),['chart','tags','rr','notes']);assert.equal(m.state.rr,0.4);assert.equal(m.state.profit_loss,-23);assert.deepEqual(m.state.transactions,trade.transactions);
  assert.equal(m.state.notes,'<p>Original note</p><p>Chart note &lt;literal&gt;</p>');assert.equal(m.state.chart,image.toString('base64'));
  await assert.rejects(applyReview(manifest,snapshot(),{...opts(m),apply:true}),/Stale/);
 });

@@ -71,10 +71,26 @@ export function reviewTemplate(snapshot,dir) {
       id:trade.id,chart_reviewed:false,
       chart_context:{date:snapshot.date,ticker:trade.ticker,time_frame:trade.time_frame,entry_candle:trade.entry_candle},
       chart_path:path.resolve(dir,`trade-${trade.id}.png`),chart_annotations:annotationPlan(trade),
+      rr:null,rr_evidence:'',
       tags:[...(trade.tags||[])],evidence:{},group_review:{...groupReview},removal_evidence:{}
     })),
     skipped:[]
   };
+}
+export function parsePositionRRLabel(label, compact=false) {
+  if(typeof label!=='string')throw Error('RR requires the TradingView position-tool label');
+  const token=compact?label.trim().split('\n').at(-1):label.match(/risk\s*\/\s*reward\s+ratio\s*:\s*([^\n]+)/i)?.[1];
+  if(!token || !/^\d+(?:[.,]\d+)?$/.test(token.trim()))throw Error('RR could not be read from the TradingView position-tool label');
+  const value=Number(token.trim().replace(',','.'));
+  if(!Number.isFinite(value))throw Error('Invalid position-tool RR');
+  return value;
+}
+export function positionRR(annotations) {
+  const read=annotations?.position_rr;
+  if(!read || read.entity_id!==annotations.position_entity_id || !['tradingview_position_tool_label','visual_position_tool_label'].includes(read.source))throw Error('RR requires a label read from the matched position tool');
+  const value=parsePositionRRLabel(read.label,read.compact===true);
+  if(read.value!==value)throw Error('RR read-back value must match the position-tool label');
+  return value;
 }
 function transactionTime(value) {
   const time=Date.parse(String(value||''));
@@ -198,7 +214,8 @@ export function validateReview(review,trade,tags,groups,date) {
   for(const g of groups){if(!review.group_review?.[g.id]?.trim())throw Error(`Unreviewed group ${g.name}`);}
   for(const range of ['pm','pd','5m','15m'])if(review.tags.includes(`pa_inside_${range}`)&&review.tags.includes(`pa_outside_${range}`))throw Error('Contradictory range tags');
   for(const key of trade.tags||[])if(!review.tags.includes(key)&&!review.removal_evidence?.[key]?.trim())throw Error(`Existing tag removal needs evidence: ${key}`);
-  if('rr' in review && (!Number.isFinite(review.rr)||review.rr<=0||!review.rr_evidence?.trim()))throw Error('RR needs positive value and matched drawing evidence');
+  if(!Number.isFinite(review.rr)||review.rr<0||!review.rr_evidence?.trim())throw Error('RR is required with matched position-tool evidence');
+  if(review.rr!==positionRR(review.chart_annotations))throw Error('RR must match the TradingView position-tool label');
   if('notes_append' in review && (typeof review.notes_append!=='string'||!review.notes_append.trim()||!review.notes_source?.trim()))throw Error('New note needs source');
   if('notes' in review)throw Error('Use notes_append to preserve existing notes');
 }

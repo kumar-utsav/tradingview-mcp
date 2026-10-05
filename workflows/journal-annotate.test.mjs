@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { planAnnotation, placeLabels, prefillReview, positionToolLevels, validatePositionPrices, segmentIntersectsBox } from './journal-annotate.mjs';
+import vm from 'node:vm';
+import { planAnnotation, placeLabels, prefillReview, positionToolLevels, validatePositionPrices, segmentIntersectsBox, preservePositionAnchors } from './journal-annotate.mjs';
 
 const at = minute => new Date(Date.parse('2026-09-24T14:00:00Z') + minute * 60000).toISOString();
 const t = minute => Math.floor(Date.parse(at(minute)) / 1000);
@@ -72,6 +73,17 @@ test('position levels expand both bands in underlying ticks and reject the forme
   const subcentLevels=positionToolLevels(subcentPlan,.01);
   assert.deepEqual(subcentLevels,{stopLevel:50,profitLevel:10.5});
   assert.deepEqual(validatePositionPrices(subcentPlan,{points:[subcentPlan.start,{time:t(1),price:771.41}],properties:subcentLevels},.01),{stop:771.91,target:771.305});
+});
+
+test('adjusted candle anchors retain sub-cent prices despite creation tick rounding', async () => {
+  const plan={id:2871,position_tool:'short_position',start:{time:t(0),price:769.89835784},end:{time:t(7),price:768.93076036},stop_price:770.39835784};
+  const drawing={points:[{time:t(0),price:769.9},{time:t(7),price:769.9}],properties:positionToolLevels(plan,.01)};
+  assert.throws(()=>validatePositionPrices(plan,drawing,.01),/stop\/target prices/);
+  const chart={getShapeById(id){assert.equal(id,'adjusted-tool');return {setPoints(points){drawing.points=structuredClone(points)}}}};
+  await preservePositionAnchors('adjusted-tool',plan,{evaluateChart:async expression=>vm.runInNewContext(expression,{window:{TradingViewApi:{_activeChartWidgetWV:{value:()=>chart}}}})});
+  assert.equal(drawing.points[0].price,plan.start.price);
+  assert.equal(drawing.points[1].time,plan.end.time);
+  assert.deepEqual(validatePositionPrices(plan,drawing,.01),{stop:plan.stop_price,target:plan.end.price});
 });
 
 test('labels stay clear of candles, each other, and chart edges', () => {
@@ -146,13 +158,18 @@ test('a note cannot hide another fill anchor on a rising sequence of candles', (
 test('review draft receives geometry and IDs while keeping visual review pending', () => {
   const snapshot={date:'2026-09-24',trades:[{...trade('Put'),date:'9/24/2026',time_frame:1,entry_candle:'06:59',outcome:'Win',tags:[]}],groups:[]};
   const plan=planAnnotation(snapshot.trades[0],bars,'1');
-  const result={id:1,chart_path:'/tmp/run/trade-1.png',position_entity_id:'tool-1',
+  const result={id:1,chart_path:'/tmp/run/trade-1.png',position_entity_id:'tool-1',position_rr:{entity_id:'tool-1',source:'tradingview_position_tool_label',label:'1.19',compact:true,value:1.19},
     position_start_candle_time:plan.start.time,position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,
     position_entry_price:plan.start.price,position_target_price:plan.end.price,
     position_stop_price:plan.stop_price,stop_distance:.5,resolution:'1',
     visible_range:{from:t(0)-60,to:t(3)+60},
     transaction_markers:plan.fills.map((f,i)=>({...f,entity_id:`label-${i}`,leader_entity_id:`leader-${i}`}))};
   const review=prefillReview(snapshot,'/tmp/run',[result],[]);
+  assert.equal(review.trades[0].rr,1.19);
+  assert.match(review.trades[0].rr_evidence,/tool-1/);
+  assert.match(review.trades[0].rr_evidence,/1\.19/);
+  const missing=structuredClone(result);delete missing.position_rr;
+  assert.throws(()=>prefillReview(snapshot,'/tmp/run',[missing],[]),/RR/);
   assert.equal(review.trades[0].chart_annotations.position_entity_id,'tool-1');
   assert.equal(review.trades[0].chart_annotations.transaction_markers[0].entity_id,'label-0');
   assert.equal(review.trades[0].chart_annotations.overlap_checked,false);

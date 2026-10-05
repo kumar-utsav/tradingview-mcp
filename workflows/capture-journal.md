@@ -9,12 +9,95 @@ intended one is unclear, ask. Use `America/Los_Angeles` with DST. Exclude
 `outcome: Miss`. Never create/import rows, use backtest ingestion, merge separate
 rows, or split one row's scale-ins/outs/reentries. Invocation authorizes these
 chart preparation in stage one and journal updates on explicit continuation in
-stage two, not broker orders, commits, deployment, or other dates.
+stage two. An explicit batch request without manual notes authorizes the
+selected days' complete capture and save as described below. Neither mode
+authorizes broker orders, commits, deployment, or unselected dates.
 
 Minimize round trips: read chart state/panes once, use the snapshot's batched app
 data and prefilled manifest, inspect saved evidence before requesting Pine/OHLC,
 and fetch only the bounded evidence still missing. Reuse data throughout the run;
 do not repeatedly fetch the catalog, chart state, or full history.
+
+## Batch replay without manual notes
+
+Use this mode only for an explicit request to journal a selected set of dates or
+trade IDs without waiting for manual notes. Keep the ordinary two-stage workflow
+as the default. Resolve the provided trades to existing journal IDs, group by
+Pacific session date, and process dates in order. If dates or IDs have not been
+supplied, describe this mode and request the batch selection; do not infer all
+journal history. A date selection includes every imported non-Miss trade for
+that date; an ID selection includes only those IDs. Keep partial-ID batches in
+a separate manifest and verify coverage against that frozen selection rather
+than claiming the entire day was captured. The day-wide review helper expects
+all imported IDs, so do not pass it an incomplete selection.
+
+For each day:
+
+1. Record original chart/tab/pane, resolution, range and replay state, including
+   whether autoplay is running. Preserve user drawings and any pending notes
+   capture. Prefer a suitable separate chart tab so another active replay is
+   undisturbed. Snapshot the selected records, charts, catalog and daily resources
+   into a unique temporary day directory. Maintain a batch ledger of selected
+   IDs, each day's state, verified saves and unresolved rows for safe resumption.
+2. Use the matching underlying and stored execution timeframe, normally 1 minute.
+   Replay that day's session through **09:00 America/Los_Angeles**, accounting for
+   DST. Convert the full date and clock to an explicit offset/UTC timestamp;
+   never pass a bare date and assume it means Pacific midnight. The existing
+   `entryCandleTime({date, entry_candle: '09:00'})` helper resolves the cutoff
+   using Pacific DST; convert its seconds to an ISO timestamp. `replay_start`
+   accepts a full ISO timestamp through its `date` argument. Seek to the cutoff
+   with replay, verify `replay_status` and actual last loaded bar, and step only
+   if needed. If autoplay is used, check its state before toggling it and pause
+   at the cutoff. An endpoint selection alone is not proof that history loaded.
+   Verify the entry, every fill candle and full trade window are present. Do not
+   include candles beyond the cutoff in screenshots or use post-exit extremes
+   for targets. Trades closing after the cutoff remain explicitly unresolved;
+   do not shorten their tool or invent an exit. No replay trade orders are needed.
+   If the user authorizes extending a day, include its final closing-fill candle.
+   TradingView's replay date selection can exclude the selected bar: select one
+   execution bar after the cutoff and verify the actual loaded last bar is the
+   cutoff. Do not repeatedly step while bars are loading; check the replay clock
+   first, and recheck it after capture to detect unintended advancement.
+3. Establish a readable day view containing the selected trades through 09:00,
+   with pre-entry structure and enough whitespace for annotations. This mode
+   authorizes changing the view for each day; use the stored timeframe, not a
+   coarser resolution to fit more candles. Record that chosen range and keep the
+   same resolution/zoom for all accepted screenshots in the day. Position tools,
+   16-point BUY/SELL callouts and diagonal leaders must follow section 3. Adjust
+   layout or revise the day view and recapture until every note and anchor is
+   visible. The automated helper requires one symbol/timeframe per run; handle
+   unsupported batches explicitly rather than changing imported identity fields.
+   Frame prices from the dated session candles with annotation padding; distant
+   indicator levels must not flatten the candles. For multiple underlyings,
+   establish and audit a separate view for each symbol, then combine the results
+   against the full day's frozen ID selection. Never apply one symbol's ranges
+   to another. Dismiss replay date/warning dialogs before capturing and visually
+   confirm they are absent from every accepted image.
+4. Capture and visually inspect every trade separately. Read native tool RR
+   before removing its temporary drawings. Do not leave all batch trades piled
+   onto one chart as a notes-stage handoff. Preserve existing user notes and
+   drawings; omit `notes_append` unless the user explicitly supplied new notes
+   to save. BUY/SELL annotations remain required even though manual commentary
+   is omitted. Never write generated intent or emotion as the user's notes.
+5. Review the current tag catalog and every checklist group. Chart-supported
+   range/structure/setup tags may be selected; execution, management and
+   emotional/process tags need their specific evidence. Existing matched notes
+   remain usable evidence, but missing notes do not justify invented intent,
+   an outcome-based judgment, or a Cannot assess tag. Explain unselected groups
+   in `group_review`. Verify selected tag keys appear in the checklist and are
+   selected under the correct groups; report catalog/UI inconsistencies.
+6. Validate the manifest, save charts/RR/supported tags on the same imported IDs,
+   and independently read records and image bytes back. Preserve all imported
+   fills, P/L, outcomes, existing notes and daily resources. Verify the entire
+   selected day before proceeding to the next. On a failed or concurrent save,
+   inspect partial state and refresh the snapshot before retrying. Continue other
+   days only when the failure is isolated and cannot contaminate their evidence.
+
+Finish with counts by date and every unresolved trade, restore the original
+chart/replay context where it was changed, and clean temporary drawings, files
+and preview processes. Retain completed capture records and unresolved recovery
+state. No manual-notes pause or further routine save confirmation is required
+for this explicitly selected batch mode.
 
 ## Two stages and the notes handoff
 
@@ -46,7 +129,10 @@ repaired without duplicates. Exclude all generated IDs (including trade identity
 labels) from user-note extraction. Preserve pre-existing drawings and user edits.
 
 Inspect the full annotated chart and each trade; save a handoff screenshot and
-record every skip. End with the date, annotated count, number-to-ID mapping, and
+record every skip. Read each retained tool's native RR using
+`readPositionRR(entityId)` from `workflows/journal-annotate.mjs` (or read its
+visible label), and store its `position_rr` evidence in the annotation results.
+End with the date, annotated count, number-to-ID mapping, and
 any unfinished trade. Tell the user to add notes numbered `1:`, `2:`, etc., then
 say **continue**. Keep the chart annotations and pending run files intact while
 waiting. Do not assess missing user commentary as a failure or claim journal
@@ -89,10 +175,13 @@ recovery files on failures and never delete the user's chart notes.
 
 ## 1. Snapshot and preserve
 
-Record the original pane, symbol, timeframe, and visible range. Every annotation
-and screenshot must retain that timeframe and zoom: never change resolution,
+Record the original pane, symbol, timeframe, and visible range. For ordinary
+two-stage capture, every annotation and screenshot must retain that timeframe
+and zoom: never change resolution,
 call `chart_set_visible_range`, use zoom controls, or alter bar spacing. Horizontal
 panning is allowed only to reach an off-screen date; restore the original view.
+For explicit batch replay, establish and record the readable day view under the
+batch procedure instead, then preserve that view across the day's screenshots.
 
 From `/Users/utsav/Projects/tradingview-mcp`, create a unique run directory outside
 the checkout, using the operating system's temporary directory. Allocate a
@@ -135,8 +224,9 @@ Match notes/drawings by explicit trade ID, else by unique date+ticker+direction+
 timing. Inspect text, rectangles, position drawings, and relevant indicator
 boxes/lines/labels. Use bounded historical bars only when pixels are insufficient.
 Never compare option premium with underlying levels, infer RR from option P/L, or
-use today's levels for a past trade. Save RR only from a uniquely matched position
-drawing; otherwise preserve it. Remove only this run's temporary annotations.
+use today's levels for a past trade. Copy Details RR from the verified,
+trade-matched position-tool label as described below. Remove only this run's
+temporary annotations.
 
 ### Chart-text notes
 
@@ -178,7 +268,9 @@ anchors. Visual review must still check overlaps, clipping, indicator conflicts,
 anchor visibility, and trade context.
 Correct a draft by hand before marking `overlap_checked` and
 `screenshot_after_annotations` true in `review.json`; the script never sets
-those review booleans or saves to the journal app.
+those review booleans or saves to the journal app. Batch mode uses this same
+per-trade capture path after establishing its replay endpoint and readable day
+view, without requiring new user notes.
 
 For final journal screenshots, work one row at a time so run-created annotations
 never overlap another trade. Stage one instead retains all trades' drawings,
@@ -206,7 +298,7 @@ For each row, using a chronological copy of all imported transactions:
    `position_target_rule: mfe_low|mfe_high` for the target level.
 4. Display stop: exactly $0.50 adverse on the underlying (short `entry + .50`,
    long `entry - .50`). The stop is fixed for every outcome and does not
-   establish planned risk or RR.
+   establish planned risk; it defines the denominator for the displayed-tool RR.
    TradingView `stopLevel` and `profitLevel` use tick counts: divide the price
    distances by the underlying's `minmov / pricescale` (SPY $0.50 = 50 ticks).
    Preserve fractional tick counts when historical candles contain sub-cent
@@ -239,11 +331,32 @@ candles and prices, $0.50 stop, every marker's text/anchor, visual order, and no
 overlap. Inspect each anchor independently: it must remain visible and its
 leader must trace clearly to exactly one note. Capture only then, record the evidence in `chart_annotations`, remove
 only that row's temporary marks, and continue. Every screenshot uses the same
-original resolution/range. A combined day view is optional and needs separate
+original resolution/range in ordinary capture, or the established day view in
+batch mode. A combined day view is optional and needs separate
 trade-ID lanes.
 
-Generated position bands are duration markers, not RR evidence unless an
-independent plan or uniquely matched pre-existing drawing supports their levels.
+### Required Details RR
+
+For every captured trade, read the RR displayed by its verified TradingView
+long/short position tool and copy that numeric value into Details `rr` exactly.
+Do not independently calculate or round RR from entry, target, stop, option
+premium, P/L, or exit prices. Save a number (`2.9`, not a `1:2.9` string); zero
+is valid when the tool displays zero.
+
+Read while the tool exists, and refresh after any annotation correction. The
+helper calls TradingView's own position-label formatter and records
+`chart_annotations.position_rr` as `{entity_id, source, label, compact, value}`
+with source `tradingview_position_tool_label`. The prefill copies this value;
+the save validator requires the matched drawing ID, label, value and
+`rr_evidence`. If the automatic reader cannot read the label, visually read the
+same verified tool and record source `visual_position_tool_label` plus its exact
+label text. Never fall back to a separately calculated ratio.
+
+This is the RR shown by the annotated tool; preserve any user's stated planned
+RR separately in their notes. Read during stage one without journal writes,
+then save and read back `rr` in stage two. Include Details in final verification;
+no reviewed trade may silently retain a blank RR. If the tool value cannot be
+read, keep the trade incomplete or explicitly skip it with the reason.
 
 ## 4. Review the live catalog
 
@@ -286,8 +399,8 @@ Complete the generated `review.template.json`, save it as `review.json`, and
 include each snapshot ID exactly once in `trades` or `skipped` with a reason. The
 template already supplies immutable chart identity, existing tags, all group IDs,
 expected position rules, and exact transaction label text. Fill its evidence,
-entity IDs, geometry, preserved range, review booleans, and optional note/RR
-fields; do not delete required fields. Optional `rr` needs `rr_evidence`;
+entity IDs, geometry, preserved range, review booleans, required `rr` and
+`rr_evidence`, and optional note fields; do not delete required fields.
 `notes_append` needs `notes_source`; never supply a replacement `notes` field.
 
 ```sh
@@ -297,7 +410,7 @@ node workflows/journal-capture.mjs review /absolute/run/review.json --apply
 
 Dry-run first. The helper validates complete ID coverage, chart identity and PNG,
 annotation/fill coverage, catalog/group/evidence rules, tag removals/conflicts,
-staleness, and one preserved view. Apply updates only chart, tags, optional RR,
+staleness, required RR, and one preserved view. Apply updates only chart, tags, RR,
 and appended notes, then independently verifies records, exact tag sets, imported
 financial fields, and chart bytes. HTTP success alone is not completion.
 

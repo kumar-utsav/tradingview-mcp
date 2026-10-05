@@ -7,7 +7,7 @@ import { status as replayStatus } from '../src/core/replay.js';
 import { getOhlcv } from '../src/core/data.js';
 import { drawShape, getProperties, removeOne, setVisualOrder } from '../src/core/drawing.js';
 import { captureScreenshot } from '../src/core/capture.js';
-import { reviewTemplate, entryCandleTime } from './journal-capture.mjs';
+import { reviewTemplate, entryCandleTime, positionRR, parsePositionRRLabel } from './journal-capture.mjs';
 
 const CHART = 'window.TradingViewApi._activeChartWidgetWV.value()';
 const STOP = 0.5;
@@ -66,6 +66,37 @@ export function planAnnotation(trade, bars, resolution) {
         text: `${fill.side} ${fill.quantity} @ $${fill.price.toFixed(2)}` };
     }),
   };
+}
+
+// Ask TradingView's own label formatter for its value. A detached receiver captures
+// the text without replacing renderer data or changing the user's drawing.
+export async function readPositionRR(entityId, {evaluateChart=evaluate}={}) {
+  const read=await evaluateChart(`(function() {
+    var source=${CHART}._chartWidget.model().dataSourceForId(${JSON.stringify(entityId)});
+    if(!source)throw Error('Position drawing is unavailable');
+    var properties=source.properties().childs();
+    if(!properties.infoBlocks.childs().riskRewardRatio.childs().visible.value())throw Error('Position-tool RR label is hidden');
+    var views=Array.from(source._paneViews.values()).flat();
+    var view=views.find(function(v){return typeof v._createMiddleLabel==='function'});
+    if(!view)throw Error('TradingView position-tool label reader is unavailable');
+    var reader=Object.create(view);
+    reader._addCenterLabel=function(renderer,label,data){return data.txt};
+    var label=view._createMiddleLabel.call(reader,{
+      entryPrice:source.entryPrice(),profitPrice:source.profitPrice(),stopPrice:source.stopPrice(),
+      currentPrice:source.entryPrice(),pl:0,left:0,edge:100,isClosed:false
+    },null,source.ownerSource().symbolSource().symbolInfo());
+    return {label:label,compact:properties.compact.value()};
+  })()`);
+  return {entity_id:entityId,source:'tradingview_position_tool_label',...read,
+    value:parsePositionRRLabel(read.label,read.compact)};
+}
+
+export async function preservePositionAnchors(entityId, plan, {evaluateChart=evaluate}={}) {
+  // Creation quantizes adjusted historical prices to the display tick. The
+  // public point setter retains their precision, keeping the actual candle
+  // anchor and both price bands consistent with the reviewed OHLC values.
+  const points=[plan.start,{time:plan.end.time,price:plan.start.price}];
+  await evaluateChart(`window.TradingViewApi._activeChartWidgetWV.value().getShapeById(${JSON.stringify(entityId)}).setPoints(${JSON.stringify(points)})`);
 }
 
 async function chartGeometry() {
@@ -264,8 +295,10 @@ async function renderTrade(plan, outputDir) {
       overrides:JSON.stringify({...levels,compact:true,fontsize:10})});
     if (!position.entity_id) throw Error(`Trade ${plan.id}: position tool has no ID`);
     created.push(position.entity_id);
+    await preservePositionAnchors(position.entity_id,plan);
     const positionRead = await assertDrawing(position.entity_id,plan.position_tool,plan.start);
     validatePositionPrices(plan, positionRead, tickSize);
+    const positionRRRead = await readPositionRR(position.entity_id);
     const markers=[];
     for (const p of placements) {
       const color=p.side==='BUY'?'#218838':'#C62828';
@@ -291,7 +324,7 @@ async function renderTrade(plan, outputDir) {
     return {id:plan.id,chart_path:destination,position_entity_id:position.entity_id,position_start_candle_time:plan.start.time,
       position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,
       position_entry_price:plan.start.price,position_target_price:plan.end.price,
-      position_stop_price:plan.stop_price,stop_distance:STOP,position_tick_size:tickSize,
+      position_stop_price:plan.stop_price,stop_distance:STOP,position_rr:positionRRRead,position_tick_size:tickSize,
       position_stop_ticks:levels.stopLevel,position_profit_ticks:levels.profitLevel,
       resolution:plan.resolution,visible_range:view,transaction_markers:markers,
       layout_automated:true,visual_review_required:true};
@@ -308,6 +341,7 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
     const result=completed.get(row.id),a=row.chart_annotations;
     Object.assign(a,{
       position_entity_id:result.position_entity_id,
+      position_rr:result.position_rr,
       position_start_candle_time:result.position_start_candle_time,
       position_end_candle_time:result.position_end_candle_time,
       position_mfe_candle_time:result.position_mfe_candle_time,
@@ -327,6 +361,8 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
       marker.leader_entity_id=found.leader_entity_id;
     }
     row.chart_path=result.chart_path;
+    row.rr=positionRR(a);
+    row.rr_evidence=`TradingView position tool ${a.position_entity_id} label: ${a.position_rr.label}. Copied directly; no independent RR calculation.`;
     return row;
   });
   draft.skipped=skipped.filter(item=>Number.isSafeInteger(item.id));

@@ -1,6 +1,6 @@
 ---
 name: capture-journal
-description: Capture imported journal trades in two stages. Annotate the TradingView day and wait for the user's trade notes; on continue, save annotated charts, notes and evidence-based tags and verify persistence. Use for capture journal, capture journal day, or continuation of a pending capture.
+description: Capture imported journal trades with chart annotations, screenshots, RR and evidence-based tags. Normally use a two-stage notes handoff; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
 ---
 
 # Capture Journal
@@ -27,6 +27,30 @@ that state across the notes handoff and clean it up after verified completion.
    the final per-trade charts and supported notes/tags/resources, and independently
    verify persistence. Preserve imported financial fields and user drawings.
 
+## Batch replay without manual notes
+
+When the user supplies multiple dates/trade IDs and requests automatic journaling
+without a manual-notes handoff, use the batch procedure in
+[capture-journal.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-journal.md#batch-replay-without-manual-notes).
+Process each day separately through **09:00 America/Los_Angeles** unless the user
+specifies another cutoff. Use the stored trade timeframe (normally 1 minute),
+establish a readable view for that day, and keep it consistent across its
+screenshots. Apply the same position-tool, fill-callout, RR, visual review and
+save-verification rules. Save directly within the requested batch; do not pause
+for the user to add notes. Preserve existing notes; add no invented commentary.
+Use chart evidence and any existing matched notes for tags. Leave unsupported
+intent/emotion/checklist choices unselected, with the reason in the review.
+No dates or trade IDs means no live batch has been selected yet.
+
+Every saved trade must also have **RR Ratio** filled in under Details. Read the
+RR displayed by that trade's TradingView long/short position tool and copy its
+numeric value exactly. Do not calculate or round a separate ratio from prices.
+Record the tool ID and its RR label in `chart_annotations.position_rr` and
+`rr_evidence`; read the saved `rr` back. Refresh this read after any tool change
+and before removing the tool. If the automatic reader is unavailable, visually
+read the same matched tool. Missing tool RR keeps the capture incomplete; stage
+one reads it without journal writes.
+
 "Capture journal" starts stage one. "Continue" or "continue capture journal"
 resumes stage two when a pending capture is established; do not infer a new day
 from a chart the user navigated to during the pause. A repeated start request
@@ -35,7 +59,8 @@ requests to do both stages together may override the pause. A notes-stage
 handoff is deliberate and is not a claim that journal saving is complete.
 
 Use the available trading and TradingView MCP tools. Authorization remains scoped
-to these stages, not broker orders, commits, deployment, or unrelated history.
+to the selected capture stages or explicit batch, not broker orders, commits,
+deployment, or unrelated history.
 
 ## Approved annotation rules
 
@@ -62,6 +87,11 @@ manifest and validate the $0.50 stop before capturing the PNG.
 TradingView position levels use tick counts, not dollar distances. Convert using
 the underlying tick size, validate the read-back stop/target prices, and visually
 confirm both position bands reach those levels before accepting the screenshot.
+Historical adjusted candles can have sub-cent prices. TradingView may round the
+initial position anchor during creation; restore both anchors with its public
+`setPoints` API using the exact candle price, then validate the stop, target and
+final-fill right edge and read native RR again. Do not round the source candle
+to make validation pass.
 
 Use **16-point, white text** in content-sized green BUY and red SELL callouts.
 Each line is `BUY|SELL quantity @ $price` with two decimal places and no added
@@ -75,7 +105,8 @@ fills. No note or another leader may hide an anchor. Check the full rendered
 text bounds extending right/down from its placement point, not a centered box.
 Keep notes above the position tool in visual order, with no overlap or clipping.
 
-Preserve the original timeframe and zoom. Adjust annotation placement until the
+For ordinary capture, preserve the original timeframe and zoom. Batch replay
+uses its explicitly established day view. Adjust annotation placement until the
 position bands, every note, every leader, and every anchor are clearly readable.
 Inspect each final PNG before accepting it; automatic placement and successful
 property read-back do not establish that the layout is clear.
