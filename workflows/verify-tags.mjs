@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { mapConcurrent } from './concurrency.mjs';
 
@@ -31,7 +32,20 @@ async function saveImages(snapshot,dir,{base,request,prefix='trade',imageConcurr
   return failures.sort((a,b)=>a.id-b.id);
 }
 export async function snapshotDay(date,dir,{base,request=fetch,imageConcurrency=4}={}) {
-  await fs.mkdir(path.dirname(path.resolve(dir)),{recursive:true});await fs.mkdir(dir);
+  await fs.mkdir(path.dirname(path.resolve(dir)),{recursive:true});
+  try {await fs.mkdir(dir);} catch(error) {
+    if(error.code!=='EEXIST')throw error;
+    // Only the dedicated, fully frozen run may exist before the app snapshot.
+    // Do not treat an arbitrary existing audit directory as a reusable target.
+    const ready=JSON.parse(await fs.readFile(path.join(dir,'chart-ready.json'),'utf8'));
+    const frozenText=await fs.readFile(path.join(dir,'frozen.json'),'utf8');
+    const frozen=JSON.parse(frozenText);
+    if(ready.chart_released!==true||ready.date!==isoDate(date)||frozen.payload?.capture_date!==isoDate(date)
+      ||ready.frozen_sha256!==createHash('sha256').update(frozenText).digest('hex')
+      ||ready.idempotency_key!==frozen.idempotency_key)throw Error('Directory is not a matching released capture');
+    try {await fs.access(path.join(dir,'before.json'));throw Error('Before snapshot already exists');}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+  }
   const snapshot=await readDay(date,{base,request});snapshot.image_failures=await saveImages(snapshot,dir,{base,request,prefix:'before',imageConcurrency});
   await fs.writeFile(path.join(dir,'before.json'),JSON.stringify(snapshot,null,2),{flag:'wx'});
   return {date:snapshot.date,trade_count:snapshot.trades.length,image_failures:snapshot.image_failures};

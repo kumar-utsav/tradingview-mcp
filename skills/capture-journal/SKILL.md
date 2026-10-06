@@ -1,6 +1,6 @@
 ---
 name: capture-journal
-description: Capture imported journal trades with chart annotations, screenshots, RR and evidence-based tags. Normally use a two-stage notes handoff; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
+description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags and dated videos from Neto and Kay Capitals. Normally use a two-stage notes handoff; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
 ---
 
 # Capture Journal
@@ -23,9 +23,15 @@ that state across the notes handoff and clean it up after verified completion.
    RR, or resources to the journal in this stage.
 2. **Continue and save.** When the user explicitly asks to continue the pending
    capture after adding notes, resume its day and mapping. Read the latest user
-   notes and chart evidence, refresh journal records and the live catalog, save
+   notes and chart evidence for every trade and preserve their text, drawing IDs,
+   points and styles in the recovery record. Complete note mapping and analysis,
+   then remove all captured commentary-note drawings before the first final
+   screenshot. Save the commentary in the app's Notes section only; keep the
+   position tools and BUY/SELL fill callouts in screenshots. Follow the
+   [commentary removal procedure](../../workflows/capture-journal.md#chart-text-notes)
+   before running the screenshot helper. Refresh journal records and the live catalog, save
    the final per-trade charts and supported notes/tags/resources, and independently
-   verify persistence. Preserve imported financial fields and user drawings.
+   verify persistence. Preserve imported financial fields and other user drawings.
 
 ## Batch replay without manual notes
 
@@ -41,6 +47,14 @@ for the user to add notes. Preserve existing notes; add no invented commentary.
 Use chart evidence and any existing matched notes for tags. Leave unsupported
 intent/emotion/checklist choices unselected, with the reason in the review.
 No dates or trade IDs means no live batch has been selected yet.
+
+During stage two, and for every date in an authorized batch, check both
+**Trade with Neto** and **Kay Capitals** for relevant dated videos. Follow the
+[dated-video procedure](../../workflows/capture-journal.md#dated-videos-from-both-channels),
+save verified links in that journal day's shared resources, and verify the saved
+URLs. Report each channel as found, checked with no match, or unavailable;
+preserving existing resources alone does not fulfill this check. Stage one still
+pauses for notes without resource writes.
 
 Every saved trade must also have **RR Ratio** filled in under Details. Read the
 RR displayed by that trade's TradingView long/short position tool and copy its
@@ -103,7 +117,10 @@ clear candle bodies and wicks; vertical leaders through candles fail review.
 Reserve space around all fill anchors before placing any note, including later
 fills. No note or another leader may hide an anchor. Check the full rendered
 text bounds extending right/down from its placement point, not a centered box.
-Keep notes above the position tool in visual order, with no overlap or clipping.
+Keep BUY/SELL callouts above the position tool in visual order, with no overlap
+or clipping. Final journal screenshots must contain no free-form user commentary;
+verify this in every PNG before accepting it. Captured commentary belongs only
+in the app's trade/daily Notes sections.
 
 For ordinary capture, preserve the original timeframe and zoom. Batch replay
 uses its explicitly established day view. Adjust annotation placement until the

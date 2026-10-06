@@ -4,7 +4,7 @@ import {
   evaluateAsync as defaultEvaluateAsync,
   getClient,
 } from "../connection.js";
-import { getPineLabels } from "./data.js";
+import { getPineLabels, getPineBoxes, getPineLines } from "./data.js";
 
 const CHART_API = "window.TradingViewApi._activeChartWidgetWV.value()";
 const MAX_TRADES_BATCH = 1000;
@@ -84,6 +84,8 @@ function dependencies(overrides = {}) {
     fetch: overrides.fetch || globalThis.fetch,
     resourceFetch: overrides.resourceFetch || globalThis.fetch,
     getPineLabels: overrides.getPineLabels || getPineLabels,
+    getPineBoxes: overrides.getPineBoxes || getPineBoxes,
+    getPineLines: overrides.getPineLines || getPineLines,
   };
 }
 
@@ -1383,8 +1385,7 @@ async function captureIsolatedTradeScreenshots(trades, inventory, deps) {
   return screenshots;
 }
 
-export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
-  const deps = dependencies(_deps);
+async function readBacktestDay(date, deps) {
   const captureDate =
     date || (await deps.evaluateAsync(selectBacktestDateExpression()));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(captureDate || "")) {
@@ -1401,18 +1402,6 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
     throw new Error(
       `The selected date ${captureDate} is not visible in the active chart. Scroll to that day and retry.`,
     );
-  }
-  let resourceLookup;
-  try {
-    resourceLookup = await findTradeWithNetoResource(captureDate, {
-      fetch: deps.resourceFetch,
-    });
-  } catch (error) {
-    resourceLookup = {
-      status: "unavailable",
-      chart_date: captureDate,
-      message: error.message,
-    };
   }
   let trades = (extraction?.trades || []).filter(
     (trade) => trade.chart_date === captureDate,
@@ -1433,6 +1422,14 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
       reason: "The position entry candle is not loaded or could not be read",
     }));
   const noteCandidates = assignedTradeNoteCandidates(extraction?.note_audit);
+  return { captureDate, inventory, extraction, dailyNotes, screenshotContext,
+    trades, skipped, noteCandidates };
+}
+
+export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
+  const deps = dependencies(_deps);
+  const { captureDate, inventory, extraction, dailyNotes, screenshotContext,
+    trades, skipped, noteCandidates } = await readBacktestDay(date, deps);
   let noteRemoval;
   try {
     noteRemoval = await removeAssignedTradeNotes(noteCandidates, deps);
@@ -1458,6 +1455,15 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
     throw new Error(
       `${error.message}. ${restored?.success ? "The removed trade notes were restored." : "The removed trade notes could not be restored automatically; use TradingView Undo."}`,
     );
+  }
+  // External lookup must not hold up chart screenshots/visibility restoration.
+  let resourceLookup;
+  try {
+    resourceLookup = await findTradeWithNetoResource(captureDate, {
+      fetch: deps.resourceFetch,
+    });
+  } catch (error) {
+    resourceLookup = { status: "unavailable", chart_date: captureDate, message: error.message };
   }
   const payload = {
     capture_date: captureDate,
@@ -1545,4 +1551,149 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
     trade_notes_deleted: keptRemoval ? acceptedCandidates.length : 0,
     ...(cleanupWarning ? { trade_note_cleanup_warning: cleanupWarning } : {}),
   };
+}
+
+// This evidence is written locally, not sent as an unbounded MCP response.
+// Never load more history, move replay or switch studies during the freeze.
+export function frozenChartEvidenceExpression(date, identityOnly = false) {
+  return `(function() {
+    /* backtest-frozen-evidence */
+    var chart = window.TradingViewApi.activeChart
+      ? window.TradingViewApi.activeChart() : ${CHART_API};
+    if (!chart) throw new Error('No active chart found');
+    var symbol = chart.symbolExt();
+    var shapes = (chart.getAllShapes() || []).map(function(meta) {
+      var shape = chart.getShapeById(meta.id);
+      return {id:String(meta.id), name:meta.name,
+        points:shape.getPoints ? shape.getPoints() : [],
+        properties:shape.getProperties ? shape.getProperties() : {}};
+    });
+    var items = chart.getSeries().data().bars()._items || [];
+    var formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'});
+    function dateOf(ts) { return formatter.format(new Date(ts * 1000)); }
+    var target = ${JSON.stringify(date)};
+    var last = null;
+    for (var i=items.length-1; i>=0; i--) {
+      var d = dateOf(items[i].value[0]);
+      if (d===target) {last=items[i].value.slice(0,5);break;}
+      if (d<target) break;
+    }
+    var identity = {source:window.location.pathname,
+      symbol:symbol.symbol || symbol.ticker, resolution:String(chart.resolution()),
+      studies:chart.getAllStudies ? chart.getAllStudies() : [],
+      visible_range:chart.getVisibleRange(), last_bar:last,
+      drawings:shapes.filter(function(s) {return !/text|note|callout|balloon/i.test(s.name);})
+        .map(function(s) {return {id:s.id,name:s.name,points:s.points,
+          stop:s.properties.stopLevel,profit:s.properties.profitLevel};})
+        .sort(function(a,b) {return a.id.localeCompare(b.id);})};
+    if (${JSON.stringify(identityOnly)}) return identity;
+    var dated = items.map(function(x) {return {date:dateOf(x.value[0]),value:x.value};});
+    var dates = Array.from(new Set(dated.map(function(x) {return x.date;})))
+      .filter(function(d) {return d < target;}).sort();
+    var previous = dates.length ? dates[dates.length-1] : null;
+    var selected = dated.filter(function(x) {return x.date===target || x.date===previous;});
+    return {identity:identity, chart_date:target, previous_loaded_date:previous,
+      drawings:shapes, bars:selected.slice(-5000).map(function(x) {return x.value.slice(0,6);}),
+      bars_truncated:selected.length>5000,
+      history_note:'Loaded bars only; missing history remains unknown, not a complete session claim.',
+      studies:chart.getAllStudies ? chart.getAllStudies() : []};
+  })()`;
+}
+
+/** Short chart-only phase. persist must durably save recovery before note removal. */
+export async function freezeBacktestDay({ date, persist, _deps } = {}) {
+  if (typeof persist !== 'function') throw new Error('A durable evidence writer is required');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('An explicit chart date is required');
+  const deps = dependencies(_deps);
+  const identity = JSON.stringify(await deps.evaluate(frozenChartEvidenceExpression(date, true)));
+  async function unchanged() {
+    const current = await deps.evaluate(frozenChartEvidenceExpression(date, true));
+    if (JSON.stringify(current) !== identity) {
+      const error = new Error('Chart changed during capture; do not release it or mix the screenshots. Recovery files are retained.');
+      error.chartChanged = true;
+      throw error;
+    }
+  }
+  // Preserve the original annotated chart before cleaning assigned notes.
+  const annotated = {mime_type:'image/png', base64:await deps.captureScreenshot(deps.evaluate)};
+  if (!annotated.base64) throw new Error('Annotated screenshot was empty');
+  const evidence = await deps.evaluate(frozenChartEvidenceExpression(date));
+  if (JSON.stringify(evidence.identity) !== identity) throw new Error('Chart changed during the annotated capture; keep it unchanged and retry');
+  await unchanged();
+  const day = await readBacktestDay(date, deps);
+  const graphics = {};
+  for (const [name, read] of [['labels',deps.getPineLabels],['boxes',deps.getPineBoxes],['lines',deps.getPineLines]]) {
+    try { graphics[name] = await read({max_labels:50}); }
+    catch (error) { graphics[name] = {success:false, error:error.message}; }
+  }
+  await unchanged();
+  const bundle = {version:1, idempotency_key:randomUUID(), frozen_at:new Date().toISOString(),
+    evidence:{...evidence,graphics}, annotated_screenshot:annotated,
+    note_audit:day.extraction?.note_audit || [],
+    payload:{capture_date:date,positions_found:day.inventory.length,trades:day.trades,
+      skipped:day.skipped,daily_note:day.dailyNotes?.note || null,daily_resources:[],
+      daily_note_drawings:day.dailyNotes?.count || 0,
+      trade_notes_found:day.extraction?.note_audit?.length || 0,
+      note_assignments:publicNoteAssignments(day.extraction?.note_audit),
+      screenshot_context:day.screenshotContext}};
+  await persist('recovery',bundle);
+  let removal;
+  let chartChanged = false;
+  const screenshotDeps = {...deps,captureScreenshot:async () => {
+    try {await unchanged();} catch (error) {chartChanged = true;throw error;}
+    const image = await deps.captureScreenshot(deps.evaluate);
+    if (!image) throw new Error('Trade screenshot was empty');
+    try {await unchanged();} catch (error) {chartChanged = true;throw error;}
+    return image;
+  }};
+  try {
+    await unchanged();
+    removal = await removeAssignedTradeNotes(day.noteCandidates,deps);
+    bundle.payload.screenshot = {mime_type:'image/png',base64:await screenshotDeps.captureScreenshot()};
+    bundle.payload.trade_screenshots = await captureIsolatedTradeScreenshots(day.trades,day.inventory,screenshotDeps);
+    bundle.trade_notes_deleted = removal ? day.noteCandidates.length : 0;
+    await unchanged();
+    await persist('frozen',bundle);
+    await unchanged();
+    const committed = await commitAssignedTradeNoteRemoval(removal,deps);
+    if (!committed?.success) throw new Error('Note cleanup checkpoint could not be finalized');
+    return bundle;
+  } catch (error) {
+    // Do not undo over new user work if they navigated/edited prematurely.
+    const restored = chartChanged || error.chartChanged ? null
+      : await restoreAssignedTradeNotes(removal,deps).catch(() => null);
+    throw new Error(`${error.message}. ${restored?.success ? 'Assigned notes restored.' : 'Retain recovery files; do not automatically undo or change the current chart.'}`);
+  }
+}
+
+/** Network-only phase: no chart reads, note cleanup, undo or view restoration. */
+export async function publishFrozenBacktestDay(bundle, { _deps } = {}) {
+  if (bundle?.version !== 1 || !bundle.idempotency_key || !bundle.payload?.screenshot?.base64
+    || !bundle.annotated_screenshot?.base64 || !Array.isArray(bundle.note_audit)
+    || !Array.isArray(bundle.payload.trades)
+    || !Array.isArray(bundle.payload.trade_screenshots)
+    || bundle.payload.trade_screenshots.length !== bundle.payload.trades?.length) {
+    throw new Error('Complete frozen capture required');
+  }
+  const sourceIds = new Set(bundle.payload.trades.map(trade => trade.source_id));
+  const screenshotIds = new Set(bundle.payload.trade_screenshots.map(item => item.source_id));
+  if (sourceIds.size !== bundle.payload.trades.length
+    || bundle.payload.trades.some(trade => typeof trade.source_id !== 'string' || !trade.source_id)
+    || screenshotIds.size !== sourceIds.size
+    || bundle.payload.trade_screenshots.some(item => !sourceIds.has(item.source_id) || !item.screenshot?.base64)) {
+    throw new Error('Every frozen trade requires its own matching screenshot');
+  }
+  const result = await postCapture('/ingestion/backtest/day','backtest.day',bundle.payload,
+    bundle.idempotency_key,dependencies(_deps));
+  const accepted = Array.isArray(result.accepted_trade_source_ids)
+    ? new Set(result.accepted_trade_source_ids) : null;
+  const rejected = new Set((result.possible_duplicates || []).map(x=>x.source_id));
+  const rejectedNotes = bundle.note_audit.filter(x=>x.status==='assigned'
+    && (accepted ? !accepted.has(x.trade_source_id) : rejected.has(x.trade_source_id)));
+  return {...result,chart_released:true,trade_notes_deleted:bundle.trade_notes_deleted,
+    note_recovery_required:rejectedNotes,
+    ...(rejectedNotes.length ? {trade_note_cleanup_warning:'Some captured notes belong to rejected trades. Keep recovery.json; restoration requires explicit user direction, never an automatic chart undo after release.'} : {}),
+    tag_review:{...(result.tag_review || {}),chart_review_required:true,workflow_complete:false,
+      next_action:'Review frozen local chart evidence and saved app records, check both dated video channels, save tags/resources and independently read them back. Do not read or mutate the live chart after release.'}};
 }

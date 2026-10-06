@@ -10,6 +10,22 @@ when invoked elsewhere. Read and follow the complete, maintained workflow at
 [capture-backtest-day.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-backtest-day.md),
 run its helpers from that project, and keep its audit artifacts there.
 
+Start with the workflow's chart-only `backtest-freeze.mjs freeze` phase before
+backend snapshots, video searches, or tag review. Capture the original annotated
+chart, notes, drawings, loaded bars, Pine evidence, and clean trade screenshots
+into a durable local bundle. This needs a brief exclusive chart window; do not
+promise an instantaneous capture. Only after the helper succeeds with
+`chart_released: true`, immediately tell the user they can move on in TradingView.
+That confirms local evidence capture, not an app save or workflow completion.
+
+After release, use only the frozen bundle, local images, and trading app reads
+and writes. Never read or mutate the live chart, restore its old view, or invoke
+Undo. Snapshot app recovery state, then publish the same bundle and idempotency
+key; never retry by recapturing whichever chart the user now has open. Preserve
+recovery files on failure. Missing frozen evidence stays unknown; a further
+chart capture or restoration needs explicit user direction. The legacy one-call
+MCP capture does not provide this early-release contract.
+
 Use the helper-generated compact review packet and same-run evidence. Validate
 the review locally before applying it; live apply must still refresh state,
 check concurrent edits and independently verify persistence. Batch independent

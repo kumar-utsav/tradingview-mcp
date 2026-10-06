@@ -2,20 +2,51 @@
 
 ## Fast, safe execution
 
-Read TradingView state once for date, ticker, timeframe, indicators, and original
-view. Then create a unique audit directory before ingestion:
+Read TradingView state once to identify the chart date, ticker and timeframe.
+Ask the user to keep the chart unchanged only for the brief capture phase. Do
+not start app snapshots, video searches, or tag review yet. From this project,
+freeze into a new, unique audit directory:
 
 ```sh
-node workflows/verify-tags.mjs snapshot YYYY-MM-DD backtest-captures/YYYY-MM-DD-HHMMSS
+node workflows/backtest-freeze.mjs freeze YYYY-MM-DD backtest-captures/YYYY-MM-DD-HHMMSS
 ```
 
-The helper batches records, live catalog/groups, daily notes/resources, and
-bounded parallel recovery-image reads into `before.json`. Do not ingest unless
-snapshot succeeds; preserve its recovery files if later steps fail. Run TradingView's
-`capture_backtest_day`, resolving its skipped positions, ambiguous notes, and
-duplicates. Its numbered text notes map to chronological trades, `DAY:` text maps
-to the daily note, and unresolved assignments must remain reported rather than
-guessed. Next batch the post-capture state and create a prefilled manifest:
+The helper captures `annotated-start.png` before cleaning assigned notes. It
+saves original drawing text/geometry, notes, loaded OHLCV and Pine graphics into
+`recovery.json` before any note removal. It then captures the clean `day.png` and
+isolated `position-N.png` images, restores position visibility, durably writes
+`frozen.json` and `chart-evidence.json`, finalizes note cleanup, and writes the
+checksum-bound `chart-ready.json`. A failed phase must not release the chart or
+claim capture success. Numbered text notes map to chronological trades, `DAY:`
+text maps to the daily note, and ambiguous assignments/skipped positions remain
+reported rather than guessed.
+
+Immediately after a successful result with `chart_released: true`, send:
+"Chart evidence secured—you can move on in TradingView now. Saving and review
+continue from the captured material." This means the local evidence is safe,
+not that ingestion, tags, or video checks have finished. There is no promise of
+zero delay: all required live-chart evidence must finish before release.
+
+From this point, NEVER read/mutate the live chart, move replay, restore the old
+view, or invoke Undo. Do not call `capture_backtest_day` to publish or retry: it
+would capture the user's next chart. Take the app's pre-ingestion recovery
+snapshot in the SAME frozen directory, then publish the frozen bundle:
+
+```sh
+node workflows/verify-tags.mjs snapshot YYYY-MM-DD /absolute/run/directory
+node workflows/backtest-freeze.mjs publish /absolute/run/directory
+```
+
+The snapshot batches records, live catalog/groups, daily notes/resources, and
+bounded parallel recovery-image reads into `before.json`; do not publish unless
+it succeeds. Publishing validates the ready marker, bundle checksum and snapshot
+date, then sends saved images/notes with the frozen idempotency key. Retain all
+recovery files on failure and retry publishing the SAME bundle/key, not a new
+chart capture. Rejected/duplicate trades with removed notes produce
+`note_recovery_required`; report this and retain the original notes locally.
+Restoration after release requires explicit user direction, never automatic
+Undo over new chart work. Resolve skipped positions, ambiguous notes and
+duplicates without guessing. Next create the post-capture review manifest:
 
 ```sh
 node workflows/verify-tags.mjs prepare YYYY-MM-DD /absolute/run/directory
@@ -27,23 +58,29 @@ and any saved legacy tags. Keep the complete catalog in `current.json` as the
 source of truth. View each saved image individually; a compact packet is not a
 substitute for chart inspection. Use `review.template.json`; do not refetch the
 catalog, full record list, or chart state unless something changes. Inspect saved
-evidence first and request only missing, bounded Pine/drawing/OHLC evidence. This
+evidence first, using only the frozen chart evidence after release. This
 workflow covers all dated records, including unchanged trades. Invocation permits
 its capture/tag/resource updates, not broker orders, commits, or deployment.
 
 ## Evidence review
 
-Actually view every chart image and read every trade note, daily note, and chart
+Actually view `annotated-start.png`, `day.png`, each `position-N.png`, and every
+saved app trade image; read every trade note, daily note, and chart
 text. Downloads are not inspection. Match each record to entry time and drawing.
 Charts must show enough pre-entry history, entry, zones, and relevant levels. A
 1m image cannot prove a 2m trigger. If an image is absent, retry
 `GET /backtest/:id/image`; the MCP missing-image flag was incorrect in the
 2026-09-21 reference run.
 
-When evidence is missing, use matching-date TradingView Pine boxes/lines/labels
-(filtered to the relevant study), manual drawing metadata, or bounded OHLC bars.
-Never use today's levels for historical trades. Avoid moving replay or changing
-indicators; restore any altered view.
+Use `chart-evidence.json` for frozen Pine boxes/lines/labels, original manual
+drawing metadata and bars. Bars are arrays of Unix seconds, open, high, low,
+close, volume, bounded to 5,000 loaded bars from the target day and latest loaded
+earlier date. `previous_loaded_date` is not proof of a complete previous session;
+check `bars_truncated`, `history_note`, and unavailable graphics. Missing history,
+hidden studies, absent timeframes and cross-market evidence stay unknown. Never
+use today's levels or the user's new chart for historical trades. If further
+live evidence is essential, ask for a separate targeted capture; do not silently
+reacquire the chart after release.
 
 Use current catalog meanings, descriptions, and selection modes—not keywords or
 an arbitrary tag count. `BnR` shorthand alone proves no required evidence item.
@@ -107,8 +144,9 @@ read-only checks only.
 
 Check both [Trade with Neto](https://www.youtube.com/@TradeWithNeto) and
 [Kay Capitals](https://www.youtube.com/@KayCapitals/videos) independently on every
-capture. The tool's automatic Neto title-prefix lookup is preliminary; it does
-not check Kay or prove recording/publication dates.
+capture, after chart release. The frozen publisher deliberately performs no
+automatic video lookup; check both channels here. Any legacy tool's automatic
+Neto title-prefix lookup is preliminary and does not prove dates or check Kay.
 
 - Search the channel for the chart date, including Neto's YYMMDD session title.
   Also inspect chronological Videos and Live listings where available. An empty

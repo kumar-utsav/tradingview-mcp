@@ -75,8 +75,10 @@ For each day:
    confirm they are absent from every accepted image.
 4. Capture and visually inspect every trade separately. Read native tool RR
    before removing its temporary drawings. Do not leave all batch trades piled
-   onto one chart as a notes-stage handoff. Preserve existing user notes and
-   drawings; omit `notes_append` unless the user explicitly supplied new notes
+   onto one chart as a notes-stage handoff. Final PNGs contain no free-form user
+   commentary; follow the chart-text procedure below if chart notes are present.
+   Preserve existing app notes and other user drawings; omit `notes_append`
+   unless the user explicitly supplied new notes
    to save. BUY/SELL annotations remain required even though manual commentary
    is omitted. Never write generated intent or emotion as the user's notes.
 5. Review the current tag catalog and every checklist group. Chart-supported
@@ -88,7 +90,9 @@ For each day:
    selected under the correct groups; report catalog/UI inconsistencies.
 6. Validate the manifest, save charts/RR/supported tags on the same imported IDs,
    and independently read records and image bytes back. Preserve all imported
-   fills, P/L, outcomes, existing notes and daily resources. Verify the entire
+   fills, P/L, outcomes, existing notes and daily resources. Check both video
+   channels and save verified links using the dated-video procedure below.
+   Verify the entire
    selected day before proceeding to the next. On a failed or concurrent save,
    inspect partial state and refresh the snapshot before retrying. Continue other
    days only when the failure is isolated and cannot contaminate their evidence.
@@ -160,10 +164,13 @@ baseline, while keeping the original mapping. Re-annotate a changed trade before
 saving it. Newly imported trades need their own annotations and note mapping;
 report them explicitly rather than assigning an existing ordinal to another ID.
 
-After preserving the user's notes, remove only the recorded stage-one generated
-drawings and use section 3 to capture each final trade separately, including its
-matched user-note context. Preserve user drawings throughout. Finish sections
-4-5 using notes and chart evidence together. Dry-run, apply, and verify saved
+Read, map, preserve and analyze all the user's notes before capturing any final
+PNG. Follow the chart-text procedure below to remove the captured commentary
+drawings, then remove the recorded stage-one generated drawings and use section
+3 to capture each final trade separately. Commentary belongs in the app's Notes
+section only and must not appear in screenshots. Preserve all other user
+drawings. Finish sections 4-5 using the preserved notes and chart evidence
+together. Dry-run, apply, and verify saved
 charts, note text, tag keys/checklist selections, immutable fills/P&L/outcomes,
 and relevant daily resources. A continuation authorizes this save; do not add
 another routine confirmation step.
@@ -171,7 +178,9 @@ another routine confirmation step.
 Mark the pending stage complete only after read-back succeeds. Restore the
 original chart view and remove disposable drafts, previews and superseded
 snapshots. Keep completed capture records and requested final artifacts; preserve
-recovery files on failures and never delete the user's chart notes.
+recovery files on failures, including the removed notes' exact source text,
+points and styles. Do not restore successfully captured commentary onto the
+chart after completion; preserve unrelated user drawings.
 
 ## 1. Snapshot and preserve
 
@@ -225,8 +234,9 @@ timing. Inspect text, rectangles, position drawings, and relevant indicator
 boxes/lines/labels. Use bounded historical bars only when pixels are insufficient.
 Never compare option premium with underlying levels, infer RR from option P/L, or
 use today's levels for a past trade. Copy Details RR from the verified,
-trade-matched position-tool label as described below. Remove only this run's
-temporary annotations.
+trade-matched position-tool label as described below. Remove this run's temporary
+annotations and the captured commentary drawings authorized below; preserve
+unrelated drawings.
 
 ### Chart-text notes
 
@@ -248,12 +258,43 @@ Stage one only records existing source notes; it does not save them. On stage
 two, record current source drawing IDs and stripped text. Use `notes_append` + `notes_source`
 for trade notes. Update daily notes through
 `PUT /journal/daily-notes/YYYY-MM-DD`, preserving `external_resources`, and read
-back both destinations. Source drawings are user artifacts; do not delete them.
+back both destinations.
+
+For future captures, the user authorizes removal of captured commentary from the
+chart after all notes have been read and analyzed, before any final journal PNG:
+
+1. Save every source drawing's exact raw text, routed text, trade ID or `DAY:`
+   destination, entity ID, pane, points and style properties in a recovery file.
+   Re-read that file and confirm all source notes are present before removing
+   anything. Complete the frozen mapping and note-based review for all trades;
+   unresolved associations must be resolved before those source notes are removed.
+2. Remove only those captured commentary drawing IDs with the TradingView drawing
+   tools. Remove them all before the first final screenshot, so another trade's
+   commentary cannot appear in a later PNG. Re-read the drawing list and verify
+   that every recorded commentary ID is absent. Keep position tools, BUY/SELL
+   callouts, their leaders, and structural/key-level drawings.
+3. Preserve unrelated notes and drawings. If unrelated commentary is visible in
+   the capture view, temporarily hide that commentary using a supported drawing
+   visibility control, record its prior state, and restore it after screenshots.
+   Do not delete it or hide all drawings. If it cannot be excluded safely, leave
+   that screenshot unresolved rather than saving commentary in the PNG.
+4. Build app notes and tag evidence from the preserved source file after removal.
+   Visually verify every final PNG has no free-form commentary and still has all
+   required transaction callouts. Confirm the note text persisted in the app's
+   Notes section. On interruption or save failure, retain note recovery data and
+   deletion progress; resume from it without duplicating app text. If the capture
+   is abandoned before persistence, restore unsaved source drawings from that
+   recovery data. Successfully captured notes remain off the chart.
+
+Stage-one handoff notes remain visible until the explicit continuation. This
+preference applies to future captures; do not rewrite previously accepted
+screenshots solely to remove commentary unless the user requests it.
 
 ## 3. Annotation rules and stage-two screenshots
 
-Stage-two fast path: after reading the user's notes, preserving their source
-drawings, removing recorded stage-one marks, and taking the fresh snapshot, run
+Stage-two fast path: after reading and analyzing all user notes, verifying their
+recovery file, removing captured commentary drawings and recorded stage-one
+marks, and taking the fresh snapshot, run
 `node workflows/journal-annotate.mjs /absolute/run/before.json`. This reads the
 imported fills and underlying candles, draws each position and compact BUY/SELL
 callouts with leader lines, saves one PNG per trade, and removes only its own
@@ -264,8 +305,10 @@ need the same minute timeframe. Inspect `annotation-draft.json`, the prefilled
 `review.draft.json`, every PNG, and every skip. The
 script places 16-point labels and diagonal leaders using screen coordinates,
 checks their paths against candles, and reserves clearance around all fill
-anchors. Visual review must still check overlaps, clipping, indicator conflicts,
-anchor visibility, and trade context.
+anchors. The helper does not extract or remove user commentary: complete that
+step before invoking it. Visual review must still check overlaps, clipping,
+indicator conflicts, anchor visibility, trade context, and the absence of
+free-form commentary from every PNG.
 Correct a draft by hand before marking `overlap_checked` and
 `screenshot_after_annotations` true in `review.json`; the script never sets
 those review booleans or saves to the journal app. Batch mode uses this same
@@ -328,7 +371,7 @@ Use vertical lanes for nearby fills. Reposition annotations—not the chart—un
 labels, bands, candles, and exit are unclipped, unambiguous, and collision-free.
 Before the PNG, read drawings back and confirm tool type, entity IDs, start/end
 candles and prices, $0.50 stop, every marker's text/anchor, visual order, and no
-overlap. Inspect each anchor independently: it must remain visible and its
+overlap or free-form user commentary. Inspect each anchor independently: it must remain visible and its
 leader must trace clearly to exactly one note. Capture only then, record the evidence in `chart_annotations`, remove
 only that row's temporary marks, and continue. Every screenshot uses the same
 original resolution/range in ordinary capture, or the established day view in
@@ -420,10 +463,39 @@ before continuing. Never blind-retry or roll back another person's changes.
 On a normal rerun, detect existing notes/media and enrich the same IDs without
 duplicating them.
 
-Preserve daily resources. Attach a video only when its URL and date are verified
-from the supplied/established source; preserve unrelated links and omit `notes`
-when updating only `external_resources`. Read daily notes/resources and journal
-rows back. Restore the original TradingView view. Report date, rows reviewed,
-tools/markers/charts/tags/notes/resources verified, and every skip or unresolved
-item. Do not claim completion with required work unresolved. When only editing
-this workflow, perform no live capture writes.
+Complete the dated-video checks below, preserve daily resources, and read daily
+notes/resources and journal rows back. Restore the original TradingView view.
+Report date, rows reviewed, tools/markers/charts/tags/notes/resources verified,
+each channel's video result, and every skip or unresolved item. Do not claim
+completion with required work unresolved. When only editing this workflow,
+perform no live capture writes.
+
+## Dated videos from both channels
+
+For stage two and every authorized batch date, independently check
+[Trade with Neto](https://www.youtube.com/@TradeWithNeto) and
+[Kay Capitals](https://www.youtube.com/@KayCapitals/videos). Follow the discovery,
+exact publication/recording-date verification, metadata helper and date-window
+coverage rules in [the shared backtest procedure](capture-backtest-day.md#dated-videos-from-both-channels).
+That reference supplies video checks only: keep this workflow's journal IDs,
+two-stage handoff and journal destination. Search each channel for the session
+date (including Neto's YYMMDD title), inspect chronological Videos and available
+Live listings, and record each channel as `found`, `checked_no_match`, or
+`unavailable`. Empty title searches or failed lookups do not establish no match.
+Use fresh evidence for the selected date; do not reuse an earlier no-match audit.
+
+Save every verified relevant link in the journal day's shared
+`external_resources`, labelled by channel and deduplicated by canonical YouTube
+video ID. These shared resources appear with all trades on that day; do not
+insert links into individual trade notes. Read current daily notes/resources
+before merging and preserve existing links and note text. Write only
+`external_resources` with `PUT /journal/daily-notes/YYYY-MM-DD`; omit `notes`.
+Independently read `GET /journal/daily-notes` and verify exact URLs and unchanged
+notes. Do not use the backtest destination from the referenced procedure.
+
+A verified link must be attached and read back before reporting completion.
+Adequate no-match checks require no resource write and allow completion. An
+unavailable or incomplete check remains explicitly unresolved; finish other
+verified work and report the limitation, without inventing a link or claiming
+full capture completion. Retain the per-channel coverage and candidate evidence
+with the completed capture record or unresolved recovery state.
