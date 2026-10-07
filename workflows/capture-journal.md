@@ -90,8 +90,7 @@ For each day:
    selected under the correct groups; report catalog/UI inconsistencies.
 6. Validate the manifest, save charts/RR/supported tags on the same imported IDs,
    and independently read records and image bytes back. Preserve all imported
-   fills, P/L, outcomes, existing notes and daily resources. Check both video
-   channels and save verified links using the dated-video procedure below.
+   fills, P/L, outcomes, existing notes and daily resources unchanged.
    Verify the entire
    selected day before proceeding to the next. On a failed or concurrent save,
    inspect partial state and refresh the snapshot before retrying. Continue other
@@ -106,8 +105,7 @@ for this explicitly selected batch mode.
 ## Two stages: capture first, finish away from TradingView
 
 This is the default for new journal captures. Only stage one occupies TradingView.
-Stage two works from a durable capture pack, user notes, the trading server and
-video sources. It must not reconnect to TradingView, read the user's new chart,
+Stage two works from a durable capture pack, user notes and the trading server. It must not reconnect to TradingView, read the user's new chart,
 change replay/layout, redraw, recapture, or restore the previous view after the
 chart has been released. A changed chart day is unrelated to the pending pack.
 
@@ -166,7 +164,7 @@ chart has been released. A changed chart day is unrelated to the pending pack.
    without repeating the live capture. If notes were already supplied and a
    combined save was authorized, continue directly into stage two.
 
-Once the chart is released, local evidence review and read-only video/server
+Once the chart is released, local evidence review and read-only server
 preparation can run independently while the user trades. Stop for the notes
 handoff without journal writes; later saving requires the user's continuation.
 This describes concurrent use of TradingView, not a promise that a stopped chat
@@ -204,8 +202,8 @@ Report the affected IDs and coordinate a brief new capture window. Do not
 interrupt the user's current TradingView session to repair these automatically.
 Missing evidence can instead remain unknown with unsupported tags unselected.
 
-Finish sections 4-5 and the two dated-video checks using cached evidence. Batch
-independent file/server/video reads; serialize writes per trade and daily record
+Finish sections 4-5 using cached evidence. Batch
+independent file/server reads; serialize writes per trade and daily record
 with the existing stale guards. Verify exact PNG bytes, notes, tags/checklist
 selections, Details RR, immutable fields and daily resources. This continuation
 already authorizes saving; no extra routine permission step is needed.
@@ -510,41 +508,19 @@ before continuing. Never blind-retry or roll back another person's changes.
 On a normal rerun, detect existing notes/media and enrich the same IDs without
 duplicating them.
 
-Complete the dated-video checks below, preserve daily resources, and read daily
+Preserve existing daily resources unchanged, and read daily
 notes/resources and journal rows back. Restore the original TradingView view
 before releasing it in stage one (or before release in batch/legacy mode), never
 at the end of a capture-first continuation.
 Report date, rows reviewed, tools/markers/charts/tags/notes/resources verified,
-each channel's video result, and every skip or unresolved item. Do not claim
+and every skip or unresolved item. Do not claim
 completion with required work unresolved. When only editing this workflow,
 perform no live capture writes.
 
-## Dated videos from both channels
+## Resources
 
-For stage two and every authorized batch date, independently check
-[Trade with Neto](https://www.youtube.com/@TradeWithNeto) and
-[Kay Capitals](https://www.youtube.com/@KayCapitals/videos). Follow the discovery,
-exact publication/recording-date verification, metadata helper and date-window
-coverage rules in [the shared backtest procedure](capture-backtest-day.md#dated-videos-from-both-channels).
-That reference supplies video checks only: keep this workflow's journal IDs,
-two-stage handoff and journal destination. Search each channel for the session
-date (including Neto's YYMMDD title), inspect chronological Videos and available
-Live listings, and record each channel as `found`, `checked_no_match`, or
-`unavailable`. Empty title searches or failed lookups do not establish no match.
-Use fresh evidence for the selected date; do not reuse an earlier no-match audit.
-
-Save every verified relevant link in the journal day's shared
-`external_resources`, labelled by channel and deduplicated by canonical YouTube
-video ID. These shared resources appear with all trades on that day; do not
-insert links into individual trade notes. Read current daily notes/resources
-before merging and preserve existing links and note text. Write only
-`external_resources` with `PUT /journal/daily-notes/YYYY-MM-DD`; omit `notes`.
-Independently read `GET /journal/daily-notes` and verify exact URLs and unchanged
-notes. Do not use the backtest destination from the referenced procedure.
-
-A verified link must be attached and read back before reporting completion.
-Adequate no-match checks require no resource write and allow completion. An
-unavailable or incomplete check remains explicitly unresolved; finish other
-verified work and report the limitation, without inventing a link or claiming
-full capture completion. Retain the per-channel coverage and candidate evidence
-with the completed capture record or unresolved recovery state.
+Do not search for, verify, or attach YouTube videos during either stage, batch
+replay or legacy chart-note capture. Preserve existing shared daily resources
+unchanged; omit `external_resources` when updating only daily notes. Keep existing
+resource read-back checks to guard against unintended changes. Missing videos
+and skipped video searches never block journal completion.

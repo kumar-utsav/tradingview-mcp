@@ -132,7 +132,7 @@ Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines')
 
 When the user says "capture backtest day" (including dictation variants), use
 `skills/capture-backtest-day/SKILL.md` and complete the chart, notes, checklist,
-tag and dated-video verification in `workflows/capture-backtest-day.md`. The
+tag verification in `workflows/capture-backtest-day.md`. The
 user authorized this tagging workflow on 2026-09-21. The manually reviewed
 reference is `tag-audit-2026-09-21/`; current catalog definitions take precedence.
 

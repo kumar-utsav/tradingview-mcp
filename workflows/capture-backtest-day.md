@@ -4,7 +4,7 @@
 
 Read TradingView state once to identify the chart date, ticker and timeframe.
 Ask the user to keep the chart unchanged only for the brief capture phase. Do
-not start app snapshots, video searches, or tag review yet. From this project,
+not start app snapshots or tag review yet. From this project,
 freeze into a new, unique audit directory:
 
 ```sh
@@ -24,7 +24,7 @@ reported rather than guessed.
 Immediately after a successful result with `chart_released: true`, send:
 "Chart evidence secured—you can move on in TradingView now. Saving and review
 continue from the captured material." This means the local evidence is safe,
-not that ingestion, tags, or video checks have finished. There is no promise of
+not that ingestion or tag review has finished. There is no promise of
 zero delay: all required live-chart evidence must finish before release.
 
 From this point, NEVER read/mutate the live chart, move replay, restore the old
@@ -60,7 +60,7 @@ substitute for chart inspection. Use `review.template.json`; do not refetch the
 catalog, full record list, or chart state unless something changes. Inspect saved
 evidence first, using only the frozen chart evidence after release. This
 workflow covers all dated records, including unchanged trades. Invocation permits
-its capture/tag/resource updates, not broker orders, commits, or deployment.
+its capture/tag updates, not broker orders, commits, or deployment.
 
 ## Evidence review
 
@@ -140,61 +140,14 @@ run directory automatically; HTTP success alone is not verification. Serialize
 chart changes, writes, and concurrent-edit checks; parallelize independent
 read-only checks only.
 
-## Dated videos from both channels
+## Resources and completion
 
-Check both [Trade with Neto](https://www.youtube.com/@TradeWithNeto) and
-[Kay Capitals](https://www.youtube.com/@KayCapitals/videos) independently on every
-capture, after chart release. The frozen publisher deliberately performs no
-automatic video lookup; check both channels here. Any legacy tool's automatic
-Neto title-prefix lookup is preliminary and does not prove dates or check Kay.
+Do not search for, verify, or attach videos from YouTube channels during capture.
+The frozen publisher performs no automatic video lookup. Do not invoke legacy
+capture helpers that automatically look up videos; publish the frozen bundle.
+Preserve existing daily resources unchanged; do not clear them or send an empty
+resources list. Missing videos and skipped video searches do not block completion.
 
-- Search the channel for the chart date, including Neto's YYMMDD session title.
-  Also inspect chronological Videos and Live listings where available. An empty
-  title search alone is insufficient, especially for Kay's undated titles.
-  Use nearby uploads' exact dates to bracket the target day, checking candidates
-  within that window. Stop when the relevant date window is covered; never
-  substitute a nearby day or a similarly titled video.
-- Open candidates, verify the owner channel, and expand the description for the
-  exact public release date. A matching recording/session date explicitly shown
-  in the description, video, or live-start metadata also qualifies even if release
-  occurred later. Distinguish recording date from publication date in the audit.
-  Don't infer a recording date from price resemblance, "today", relative upload
-  age, or a date mentioned without recording/session context.
-- Verify discovered candidate URLs with the metadata helper first; browser
-  playback and repeated description expansion are unnecessary when exact dates
-  and channel identity are already verified. For one URL, run
-  `node workflows/video-date.mjs YYYY-MM-DD neto|kay HTTPS_WATCH_URL /absolute/run/video-result.json`.
-  The helper verifies channel/video identity and exact publication/live-start
-  dates; save its output in the capture audit. An undated prerecorded video can
-  require manual recording-date evidence. Private upload metadata alone is not
-  public release. Use the date shown by YouTube for publication, and the Pacific
-  chart-session date for a timestamped live recording.
-- For several candidates across both channels, write a JSON array of
-  `{"channel":"neto|kay","url":"HTTPS_WATCH_URL"}` objects and run
-  `node workflows/video-date.mjs YYYY-MM-DD --batch /absolute/run/candidates.json /absolute/run/video-results.json`.
-  It bounds parallel reads to four and downloads each canonical video once per
-  invocation. Inspect every result: partial failures remain `unavailable`, not
-  no-match. Candidate verification does not replace channel date-window coverage.
-  Run independent two-channel discovery alongside chart review when practical;
-  reuse same-run evidence, not stale no-match findings from previous captures.
-- Record each channel as `found`, `checked_no_match`, or `unavailable`, with
-  searched surfaces, date-window coverage and candidate evidence. A properly
-  checked no-match for either or both is expected and does not block completion
-  or require a link from the user. A blocked page, failed lookup, unverified date
-  or search stopped before covering the window is unavailable/incomplete, not
-  evidence that no video exists. Report that limitation accurately.
-
-Save all verified relevant dated videos from both channels in `daily_resources`,
-labelled by channel and deduplicated by canonical video ID. Preserve unrelated
-and previously verified resources. Read the latest resources before merging,
-update `PUT /backtest/daily-notes/YYYY-MM-DD` without sending an empty `notes`
-field, and independently read back from `GET /backtest/daily-notes` or the dated
-trade records. Verify exact attached URLs and unchanged notes; a lookup result
-is not attachment proof. If neither channel matches, no resource write is needed.
-
-Report trade count, verified tags, each channel's video result, and specific
-unresolved chart evidence. No-video days are complete when both checks are
-adequate; never claim required tagging or found-resource verification complete
-while it remains unresolved. API base defaults to
-`http://100.125.89.9:5555`; set `TRADING_API_URL` if live verification finds a
-different endpoint.
+Report trade count, verified charts/notes/tags and specific unresolved chart
+evidence. API base defaults to `http://100.125.89.9:5555`; set `TRADING_API_URL`
+if live verification finds a different endpoint.

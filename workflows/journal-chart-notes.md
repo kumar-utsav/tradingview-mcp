@@ -3,7 +3,7 @@
 Use this only when the user explicitly asks to leave annotations on the chart
 for notes, or when resuming an already-created `stage.json` without
 `mode: capture_first`. New captures default to the saved capture pack. Follow
-the shared annotation, RR, catalog, video and save rules in
+the shared annotation, RR, catalog and save rules in
 [capture-journal.md](capture-journal.md). This mode occupies TradingView twice;
 do not silently choose it when the user expects the chart to be released.
 
@@ -85,4 +85,3 @@ snapshots. Keep completed capture records and requested final artifacts; preserv
 recovery files on failures, including the removed notes' exact source text,
 points and styles. Do not restore successfully captured commentary onto the
 chart after completion; preserve unrelated user drawings.
-

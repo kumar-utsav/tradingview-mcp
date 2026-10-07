@@ -1,6 +1,6 @@
 ---
 name: capture-journal
-description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags and dated videos from Neto and Kay Capitals. Capture screenshots/RR/evidence first and release TradingView, then process user notes and save from the local pack without chart access; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
+description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags. Capture screenshots/RR/evidence first and release TradingView, then process user notes and save from the local pack without chart access; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
 ---
 
 # Capture Journal
@@ -31,7 +31,7 @@ continuation or a changed chart cannot lose the screenshots/evidence.
    date and numbers, not today's visible chart. Read user notes, refresh only
    server records/catalog/resources and use `journal-pack.mjs resume` to build
    the review from cached images/native RR and the latest server baseline.
-   Analyze supported tags/checklists, check both video channels, save and verify
+   Analyze supported tags/checklists, save and verify
    every trade. **Do not call TradingView tools, redraw, recapture, or restore
    the old chart during this stage.** The user may freely trade, change tabs,
    replay or navigate. Missing evidence stays unknown; a changed trade or
@@ -67,13 +67,10 @@ Use chart evidence and any existing matched notes for tags. Leave unsupported
 intent/emotion/checklist choices unselected, with the reason in the review.
 No dates or trade IDs means no live batch has been selected yet.
 
-During stage two, and for every date in an authorized batch, check both
-**Trade with Neto** and **Kay Capitals** for relevant dated videos. Follow the
-[dated-video procedure](../../workflows/capture-journal.md#dated-videos-from-both-channels),
-save verified links in that journal day's shared resources, and verify the saved
-URLs. Report each channel as found, checked with no match, or unavailable;
-preserving existing resources alone does not fulfill this check. Stage one still
-pauses for notes without resource writes.
+Do not search for, verify, or attach YouTube videos in either stage, batch replay,
+or legacy chart-note mode. Preserve existing shared daily resources unchanged;
+missing videos never block completion. Stage one still pauses for notes without
+journal writes.
 
 Every saved trade must also have **RR Ratio** filled in under Details. Read the
 RR displayed by that trade's TradingView long/short position tool and copy its

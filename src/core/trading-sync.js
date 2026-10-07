@@ -1695,5 +1695,5 @@ export async function publishFrozenBacktestDay(bundle, { _deps } = {}) {
     note_recovery_required:rejectedNotes,
     ...(rejectedNotes.length ? {trade_note_cleanup_warning:'Some captured notes belong to rejected trades. Keep recovery.json; restoration requires explicit user direction, never an automatic chart undo after release.'} : {}),
     tag_review:{...(result.tag_review || {}),chart_review_required:true,workflow_complete:false,
-      next_action:'Review frozen local chart evidence and saved app records, check both dated video channels, save tags/resources and independently read them back. Do not read or mutate the live chart after release.'}};
+      next_action:'Review frozen local chart evidence and saved app records, save supported tags and independently read them back. Preserve existing resources; do not search for or attach videos. Do not read or mutate the live chart after release.'}};
 }
