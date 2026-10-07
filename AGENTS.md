@@ -140,10 +140,15 @@ When the user says "capture journal" or "capture journal day", use
 `skills/capture-journal/SKILL.md` and process all already-imported journal trades
 for the visible chart day under `workflows/capture-journal.md`. The user selected
 all imported trades for that day on 2026-09-23. Preserve imported IDs, fills,
-P/L, outcomes and existing notes. First leave all trade annotations on the chart
-and pause for the user's numbered notes, without journal writes. On an explicit
-continuation, save charts, notes and tags and finish read-back verification before
-reporting journal completion. The dated reference is
+P/L, outcomes and existing notes. By default, annotate/screenshot each trade
+once, cache native RR and dated evidence in a Desktop capture pack, remove its
+temporary marks, and restore/verify the user's chart before releasing TradingView.
+Pause for numbered notes in chat or the pack file, without journal writes. On
+continuation, process the saved pack and fresh server catalog, save and verify
+charts/notes/tags/RR/resources **without TradingView access**. Do not restore the
+old chart after release. Changed trades require a coordinated new capture window.
+Use the legacy retained-chart notes mode only when explicitly requested or when
+resuming an already-existing pending capture. The dated reference is
 `journal-workflow-2026-09-23/`; load the current catalog for each capture.
 
 These two personal skills are linked from `/Users/utsav/.agents/skills/`, so

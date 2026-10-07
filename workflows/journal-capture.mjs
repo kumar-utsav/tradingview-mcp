@@ -97,7 +97,7 @@ function transactionTime(value) {
   if(!Number.isFinite(time))throw Error('Transaction needs a valid filledTime');
   return time;
 }
-function validateChartAnnotations(review,trade) {
+export function validateChartAnnotations(review,trade) {
   if(typeof review.chart_path!=='string'||!review.chart_path.trim())throw Error(`Annotated chart_path required: ${trade.id}`);
   const annotations=review.chart_annotations;
   if(!annotations||typeof annotations!=='object')throw Error(`Chart annotations required: ${trade.id}`);

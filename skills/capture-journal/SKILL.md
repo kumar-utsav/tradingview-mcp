@@ -1,6 +1,6 @@
 ---
 name: capture-journal
-description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags and dated videos from Neto and Kay Capitals. Normally use a two-stage notes handoff; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
+description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags and dated videos from Neto and Kay Capitals. Capture screenshots/RR/evidence first and release TradingView, then process user notes and save from the local pack without chart access; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
 ---
 
 # Capture Journal
@@ -8,30 +8,49 @@ description: Capture imported journal trades with chart annotations, screenshots
 This local skill always operates in `/Users/utsav/Projects/tradingview-mcp`, even
 when invoked elsewhere. Read and follow the complete, maintained workflow at
 [capture-journal.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-journal.md),
-run its helpers from that project. Keep pending run state and disposable evidence
-in a unique operating-system temporary directory outside the checkout; preserve
-that state across the notes handoff and clean it up after verified completion.
+run its helpers from that project. Keep disposable work in the OS temporary
+directory, outside the checkout. Pending capture packs are durable user artifacts
+under `/Users/utsav/Desktop/Journal Captures/`, so chat compaction, a later
+continuation or a changed chart cannot lose the screenshots/evidence.
 
-## Two-stage capture
+## Capture first, then finish without TradingView
 
-1. **Prepare the chart.** Read every imported trade for the requested/visible
-   day. Add all position tools, BUY/SELL quantity/price callouts, diagonal leaders,
-   and clear trade numbers using the approved rules below. Leave all those
-   drawings on the chart so the user can add notes for each numbered trade.
-   Save the fixed number-to-trade-ID mapping, created drawing IDs, and chart/run
-   state. Stop with the chart ready for notes; do not write charts, notes, tags,
-   RR, or resources to the journal in this stage.
-2. **Continue and save.** When the user explicitly asks to continue the pending
-   capture after adding notes, resume its day and mapping. Read the latest user
-   notes and chart evidence for every trade and preserve their text, drawing IDs,
-   points and styles in the recovery record. Complete note mapping and analysis,
-   then remove all captured commentary-note drawings before the first final
-   screenshot. Save the commentary in the app's Notes section only; keep the
-   position tools and BUY/SELL fill callouts in screenshots. Follow the
-   [commentary removal procedure](../../workflows/capture-journal.md#chart-text-notes)
-   before running the screenshot helper. Refresh journal records and the live catalog, save
-   the final per-trade charts and supported notes/tags/resources, and independently
-   verify persistence. Preserve imported financial fields and other user drawings.
+1. **Capture and release.** Snapshot every imported trade for the chosen day.
+   Freeze trade numbers by first actual fill, then ID. Cache dated candles,
+   levels/zones, user drawings and range completeness once. For each trade,
+   draw its approved position tool and all BUY/SELL callouts, read native RR,
+   capture and visually accept its commentary-free PNG, then remove its own
+   marks. Correct unclear captures now. Restore/verify original chart, user
+   drawings and price scale, then disconnect.
+   Use `journal-pack.mjs create` to seal the accepted PNGs/RR, evidence and
+   mapping into a Desktop capture pack with a gallery and `notes.md`. Then say
+   **TradingView is free to use**, link/open the pack and ask for numbered notes in chat or that file, then **continue**.
+   No journal writes happen at this handoff; no annotations need to stay on the
+   live chart. Reuse an existing ready pack on a repeated start request.
+2. **Process and save away from the chart.** On continuation, resume the pack's
+   date and numbers, not today's visible chart. Read user notes, refresh only
+   server records/catalog/resources and use `journal-pack.mjs resume` to build
+   the review from cached images/native RR and the latest server baseline.
+   Analyze supported tags/checklists, check both video channels, save and verify
+   every trade. **Do not call TradingView tools, redraw, recapture, or restore
+   the old chart during this stage.** The user may freely trade, change tabs,
+   replay or navigate. Missing evidence stays unknown; a changed trade or
+   damaged capture needs a coordinated new capture window, not an automatic
+   chart interruption. Preserve existing notes and imported financial fields.
+
+The maintained [capture-first procedure](../../workflows/capture-journal.md#two-stages-capture-first-finish-away-from-tradingview)
+describes pack inputs, notes formats, stale checks and release verification.
+Pack files, not model memory, are the source of truth. This workflow permits
+working while the user uses TradingView; it does not promise unattended work
+between turns or create an automation. Stage two is authorized by continuation.
+
+For an existing pending retained-chart capture or an explicit request to leave
+annotations for chart notes, read only then
+[journal-chart-notes.md](../../workflows/journal-chart-notes.md). New captures use
+the pack flow. Existing captured commentary must still be preserved/mapped and
+removed before final PNGs; unrelated commentary is hidden temporarily and restored
+before chart release. New pack notes are entered after PNGs and appear only in
+app Notes. Do not silently use the legacy flow or make a second screenshot pass.
 
 ## Batch replay without manual notes
 
@@ -68,8 +87,8 @@ one reads it without journal writes.
 "Capture journal" starts stage one. "Continue" or "continue capture journal"
 resumes stage two when a pending capture is established; do not infer a new day
 from a chart the user navigated to during the pause. A repeated start request
-must reuse/repair the pending annotations rather than duplicate them. Explicit
-requests to do both stages together may override the pause. A notes-stage
+must reuse the pending pack; legacy runs reuse/repair their recorded annotations.
+Explicit requests to do both stages together may override the pause. A notes-stage
 handoff is deliberate and is not a claim that journal saving is complete.
 
 Use the available trading and TradingView MCP tools. Authorization remains scoped
@@ -128,11 +147,10 @@ position bands, every note, every leader, and every anchor are clearly readable.
 Inspect each final PNG before accepting it; automatic placement and successful
 property read-back do not establish that the layout is clear.
 
-For stage one, create and retain the drawings with the TradingView MCP, using
-the workflow's retained-chart procedure. `workflows/journal-annotate.mjs` removes
-its own drawings after each screenshot, so it is a stage-two helper, not the
-stage-one handoff. Review and adjust its PNG drafts before journal apply; its
-automatic layout is not proof that every label is visually clear.
+Run `workflows/journal-annotate.mjs` in stage one for the default capture-pack
+handoff: it removes its own drawings after each screenshot. Inspect and correct
+its PNGs before chart release; automatic layout is not visual acceptance. Only
+the explicitly requested legacy mode retains all drawings for live-chart notes.
 
 If the workflow or required services are unavailable, name the dependency rather
 than creating substitute records or claiming completion. This skill is local to

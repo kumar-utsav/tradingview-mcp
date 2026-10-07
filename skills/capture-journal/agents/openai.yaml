@@ -1,6 +1,6 @@
 interface:
   display_name: "Capture Journal"
-  short_description: "Annotate trades, pause for notes, then save the journal"
-  default_prompt: "Use $capture-journal to annotate the visible TradingView day and pause while I add trade notes."
+  short_description: "Capture trades, release the chart, then journal from notes"
+  default_prompt: "Use $capture-journal to capture each trade for the visible day, save a local capture pack, release TradingView, and pause for my numbered notes. Finish from the pack when I say continue."
 policy:
   allow_implicit_invocation: true

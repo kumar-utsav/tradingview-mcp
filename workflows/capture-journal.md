@@ -21,7 +21,7 @@ do not repeatedly fetch the catalog, chart state, or full history.
 ## Batch replay without manual notes
 
 Use this mode only for an explicit request to journal a selected set of dates or
-trade IDs without waiting for manual notes. Keep the ordinary two-stage workflow
+trade IDs without waiting for manual notes. Keep capture-first with a notes handoff
 as the default. Resolve the provided trades to existing journal IDs, group by
 Pacific session date, and process dates in order. If dates or IDs have not been
 supplied, describe this mode and request the batch selection; do not infer all
@@ -103,84 +103,128 @@ and preview processes. Retain completed capture records and unresolved recovery
 state. No manual-notes pause or further routine save confirmation is required
 for this explicitly selected batch mode.
 
-## Two stages and the notes handoff
+## Two stages: capture first, finish away from TradingView
 
-### Stage one: leave every trade annotated on the chart
+This is the default for new journal captures. Only stage one occupies TradingView.
+Stage two works from a durable capture pack, user notes, the trading server and
+video sources. It must not reconnect to TradingView, read the user's new chart,
+change replay/layout, redraw, recapture, or restore the previous view after the
+chart has been released. A changed chart day is unrelated to the pending pack.
 
-Complete sections 1-2 for the chosen day, then create the section 3 annotations
-with the TradingView MCP and retain them. The screenshot helper in section 3
-removes drawings; do not run it as the stage-one handoff. Use its exported
-`planAnnotation`/position-level utilities when useful for computing geometry,
-but create the retained tools and labels with MCP drawing tools and verify their
-properties and appearance. No journal write helper or API mutation runs here.
+### Stage one: capture each trade once, then release the chart
 
-Freeze trade order by first actual fill time, then imported ID, excluding Miss.
-Give each trade a visible identity label such as `Trade 1 | ID 2923`, separate
-from its transaction callouts. These numbers also route the user's subsequent
-notes. Do not add invented trading commentary or empty user-note placeholders.
-Use separate lanes and adjust placements across the entire day, so notes,
-leaders, and anchors from neighboring trades remain clear. Leave every trade's
-position tool and fill marks in place; do not remove one before drawing the
-next. Use matching panes for different underlyings and preserve original zoom
-and timeframe. Horizontal panning may be needed to inspect all trades.
+1. Complete sections 1-2 once for the chosen day. Freeze ordinals by first actual
+   fill time, then imported ID. Reuse the day's fetched candles and chart evidence
+   for every trade rather than fetching the same history repeatedly. Cache the
+   relevant underlying/timeframe candles, manual drawings and visible dated
+   indicator levels/zones; include supporting panes only when needed. Capture
+   full previous regular-session and premarket/opening ranges when available.
+   Record a missing/incomplete range as unknown with its reason now; do not
+   plan to retrieve it from TradingView during stage two.
+2. Use section 3 to draw **one trade at a time**, read its native tool RR, capture
+   its final commentary-free PNG, and remove only that trade's generated marks.
+   Run `node workflows/journal-annotate.mjs /absolute/run/before.json` now,
+   not after the notes handoff. Keep the approved zoom, stop, MFE, final-exit
+   edge, fill callouts and leaders. Inspect every PNG while the capture window
+   is still open; correct unclear annotations now. Set `chart_reviewed`,
+   `view_preserved`, `overlap_checked`, `screenshot_after_annotations` and
+   `chart_annotations.commentary_free` true only after that inspection.
+   Missing/invalid captures remain incomplete, not ready for notes.
+3. Finish all TradingView work: remove run-created marks, restore any temporarily
+   hidden commentary, verify the user's original drawings/styles/points, pane,
+   symbol, timeframe, horizontal view and price scale. History loading can shift
+   unloaded drawing anchors; restore original points only after those anchors
+   are loaded. Save release verification with `chart_restored`,
+   `user_drawings_preserved`, `temporary_annotations_removed` and
+   `tradingview_released` all true. Disconnect the capture session. Do not use
+   the chart again after announcing its release.
+4. Seal the accepted PNGs, chart review, native RR, frozen IDs and supporting
+   evidence into a unique durable folder under
+   `/Users/utsav/Desktop/Journal Captures/YYYY-MM-DD-<run-id>/`. The capture pack
+   is the source of truth, not conversational/model memory. Temporary scripts
+   and drafts stay in the OS temporary directory. No journal writes happen yet.
+   `journal-pack.mjs create` writes the gallery, notes template and ready state
+   only when all trades are visually reviewed and release is verified:
 
-Maintain `stage.json` in the pending run directory with `phase: awaiting_notes`,
-the fixed date and snapshot path, the original pane/symbol/timeframe/range,
-ordered `{number, trade_id}` pairs, every generated drawing ID grouped by trade
-and pane, existing user-note drawing IDs/text, annotation results, and unresolved
-rows. Record drawing IDs as they are created so interrupted preparation can be
-repaired without duplicates. Exclude all generated IDs (including trade identity
-labels) from user-note extraction. Preserve pre-existing drawings and user edits.
+   ```sh
+   node workflows/journal-pack.mjs create /absolute/run/pack-config.json "/Users/utsav/Desktop/Journal Captures/YYYY-MM-DD-<run-id>"
+   ```
 
-Inspect the full annotated chart and each trade; save a handoff screenshot and
-record every skip. Read each retained tool's native RR using
-`readPositionRR(entityId)` from `workflows/journal-annotate.mjs` (or read its
-visible label), and store its `position_rr` evidence in the annotation results.
-End with the date, annotated count, number-to-ID mapping, and
-any unfinished trade. Tell the user to add notes numbered `1:`, `2:`, etc., then
-say **continue**. Keep the chart annotations and pending run files intact while
-waiting. Do not assess missing user commentary as a failure or claim journal
-saving is complete. A repeated start for this pending day reuses/repairs existing
-drawings instead of creating another set.
+   `pack-config.json` contains absolute `snapshot_path`, `review_path`,
+   `evidence_path`, and `release_path`. Evidence is dated JSON:
+   `{date, captured_at, sources:[{ticker, time_frame, bars, drawings, indicators,
+   ranges}]}`. Bars use `{time,open,high,low,close,volume}`. Every source records
+   `pm`, `pd`, `5m`, `15m` ranges as either
+   `{status:"complete", date, from, to, low, high, bar_count, source}` or
+   `{status:"unknown", reason}`. Native drawing IDs are historical evidence;
+   never dereference them in a later TradingView session.
+5. Open/link `capture-pack.md` and `notes.md`, give the fixed trade numbers,
+   and say **TradingView is free to use**. The user can dictate/type numbered
+   notes here or edit `notes.md`, then say continue. `NO NOTE` explicitly skips
+   a trade's commentary. Do not require notes to be placed on the chart.
+   A repeated capture request for this pending day reopens the saved pack,
+   without repeating the live capture. If notes were already supplied and a
+   combined save was authorized, continue directly into stage two.
 
-### Stage two: read the new notes, save, and verify
+Once the chart is released, local evidence review and read-only video/server
+preparation can run independently while the user trades. Stop for the notes
+handoff without journal writes; later saving requires the user's continuation.
+This describes concurrent use of TradingView, not a promise that a stopped chat
+keeps running or a request to create an automation/worker.
 
-An explicit continuation resumes the pending date and frozen mapping. Locate
-`stage.json` from this conversation; never silently substitute the chart's new
-visible date or renumber trades. If pending state is unavailable, recover the
-mapping from the recorded IDs/chart labels before mutating anything. If more
-than one pending day could match, ask which one to resume.
+### Stage two: process the pack and save without TradingView
 
-Read current user-note drawings and chart context first, using the chart-text
-rules below and the frozen numbering. Save their source IDs and text before
-removing any stage-one drawings. User notes may have been added or edited during
-the pause: re-read them now, rather than using stage-one text or screenshots.
-Unresolved note mappings remain unresolved; do not guess or shift other numbers.
+Resume the recorded `mode: capture_first` pack/date/ordinals. First read notes
+from the user's message or the pack's `notes.md`; chat/dictation can be copied
+verbatim into `user-notes.json` with
+`{date, trades:[{number,trade_id,text,no_note:false}], daily:""}`. Every trade
+needs text or explicit `no_note:true`. Preserve the source text and file hash.
+Unresolved ordinals are not silently reassigned or treated as no note.
 
-Take a fresh snapshot in a new run directory and reload the catalog, groups,
-notes/resources, and imported records. Compare IDs and fills with the stage-one
-snapshot. Preserve current notes/tags and use the fresh snapshot as the save
-baseline, while keeping the original mapping. Re-annotate a changed trade before
-saving it. Newly imported trades need their own annotations and note mapping;
-report them explicitly rather than assigning an existing ordinal to another ID.
+Take a fresh **server-only** snapshot into a new temporary child directory to
+refresh trades, catalog/groups and notes/resources. Use the existing snapshot
+helper; it does not connect to TradingView. Prepare a fresh review using cached
+charts/RR, the latest tags/notes and the frozen mapping:
 
-Read, map, preserve and analyze all the user's notes before capturing any final
-PNG. Follow the chart-text procedure below to remove the captured commentary
-drawings, then remove the recorded stage-one generated drawings and use section
-3 to capture each final trade separately. Commentary belongs in the app's Notes
-section only and must not appear in screenshots. Preserve all other user
-drawings. Finish sections 4-5 using the preserved notes and chart evidence
-together. Dry-run, apply, and verify saved
-charts, note text, tag keys/checklist selections, immutable fills/P&L/outcomes,
-and relevant daily resources. A continuation authorizes this save; do not add
-another routine confirmation step.
+```sh
+node workflows/journal-capture.mjs snapshot YYYY-MM-DD /absolute/new/run/server-snapshot
+node workflows/journal-pack.mjs resume "/absolute/pack" /absolute/new/run/server-snapshot/before.json /absolute/new/run/review.json [absolute-notes-file]
+```
 
-Mark the pending stage complete only after read-back succeeds. Restore the
-original chart view and remove disposable drafts, previews and superseded
-snapshots. Keep completed capture records and requested final artifacts; preserve
-recovery files on failures, including the removed notes' exact source text,
-points and styles. Do not restore successfully captured commentary onto the
-chart after completion; preserve unrelated user drawings.
+Resume checks image integrity, financial/fill identity and chart changes during
+handoff. Current notes/tags/resources are preserved, and group review starts
+fresh against the current catalog. The returned review is an **analysis draft**:
+complete every tag's evidence and every group's reason under section 4. Do not
+copy old checklist judgments or append already-saved exact note paragraphs.
+Optional Day text is a separate pending daily-note merge preserving resources.
+
+A changed fill, entry candle, underlying, timeframe or day/ID set requires a new
+capture; a missing/corrupt PNG or incompatible server chart also stays unresolved.
+Report the affected IDs and coordinate a brief new capture window. Do not
+interrupt the user's current TradingView session to repair these automatically.
+Missing evidence can instead remain unknown with unsupported tags unselected.
+
+Finish sections 4-5 and the two dated-video checks using cached evidence. Batch
+independent file/server/video reads; serialize writes per trade and daily record
+with the existing stale guards. Verify exact PNG bytes, notes, tags/checklist
+selections, Details RR, immutable fields and daily resources. This continuation
+already authorizes saving; no extra routine permission step is needed.
+
+Mark the pack complete only after required read-back and app UI verification.
+Retain the accepted pack/completed records; clean temporary drafts/native
+screenshot copies after verification. Do not touch TradingView for cleanup or
+restore the old chart at the end of stage two: it was restored in stage one.
+
+### Existing or explicitly requested chart-note handoffs
+
+For a pending retained-chart capture without `mode: capture_first`, finish it
+under [journal-chart-notes.md](journal-chart-notes.md), preserving its frozen
+mapping and note recovery. Use that same optional mode for an explicit request
+for live-chart annotations/notes. Do not load its detailed instructions for the
+normal saved-pack workflow. If the user explicitly puts new notes on the chart
+for a saved pack, read/map/back up those notes in one agreed brief access window,
+then release TradingView again; use the already captured PNGs/RR, not a second
+annotation pass. Preserve/remove captured commentary under the chart-text rules.
 
 ## 1. Snapshot and preserve
 
@@ -221,13 +265,14 @@ convention (the candle before the fill bucket, so a 07:11:12 fill may store
 07:10). Do not rewrite it or substitute the fill candle. Actual fill times
 control transaction markers and the MFE search window.
 
-View the saved chart first. If missing, stale, mismatched, or inadequate, navigate
+During stage one, view the saved chart first. If missing, stale, mismatched, or inadequate, navigate
 to the matching historical session at the preserved zoom and capture enough
 pre-entry structure, entry, levels, and management context. Preserve multi-pane
 context when relevant; focus a pane only to read candles. All panes used as
 evidence must show the same date. Reading/downloading an image is not visual
-inspection. A prior saved image is review evidence only; it never replaces the
-fresh per-trade annotated PNG required below.
+inspection. An older server image is review evidence only; it does not replace the new
+per-trade annotated PNG. A sealed pack's accepted PNG is the final image for its
+stage-two continuation and must be reused without a second capture.
 
 Match notes/drawings by explicit trade ID, else by unique date+ticker+direction+
 timing. Inspect text, rectangles, position drawings, and relevant indicator
@@ -239,6 +284,14 @@ annotations and the captured commentary drawings authorized below; preserve
 unrelated drawings.
 
 ### Chart-text notes
+
+Normal capture-first notes come from chat or the pack file, after screenshots
+are captured. These drawing rules apply only to existing chart commentary or an
+explicit chart-note mode. Before early screenshots, back up and temporarily hide
+visible commentary using supported per-drawing visibility, then restore it before
+release; never delete unrelated notes. Commentary being captured now may instead
+be removed after mapping/analysis and recovery as described below. Unresolved
+commentary visibility keeps the PNG incomplete.
 
 Before creating temporary labels, inspect text/note/callout/balloon drawings
 anchored to the date. Order trades by first actual entry time, then ID.
@@ -290,34 +343,28 @@ Stage-one handoff notes remain visible until the explicit continuation. This
 preference applies to future captures; do not rewrite previously accepted
 screenshots solely to remove commentary unless the user requests it.
 
-## 3. Annotation rules and stage-two screenshots
+## 3. Annotation rules and early screenshots
 
-Stage-two fast path: after reading and analyzing all user notes, verifying their
-recovery file, removing captured commentary drawings and recorded stage-one
-marks, and taking the fresh snapshot, run
-`node workflows/journal-annotate.mjs /absolute/run/before.json`. This reads the
-imported fills and underlying candles, draws each position and compact BUY/SELL
-callouts with leader lines, saves one PNG per trade, and removes only its own
-temporary drawings. It restores the chart's starting symbol, timeframe, and
-visible range. If replay is active before the final fill, advance replay first;
-the script checks this before changing the chart. All rows in one run currently
-need the same minute timeframe. Inspect `annotation-draft.json`, the prefilled
-`review.draft.json`, every PNG, and every skip. The
-script places 16-point labels and diagonal leaders using screen coordinates,
-checks their paths against candles, and reserves clearance around all fill
-anchors. The helper does not extract or remove user commentary: complete that
-step before invoking it. Visual review must still check overlaps, clipping,
-indicator conflicts, anchor visibility, trade context, and the absence of
-free-form commentary from every PNG.
-Correct a draft by hand before marking `overlap_checked` and
-`screenshot_after_annotations` true in `review.json`; the script never sets
-those review booleans or saves to the journal app. Batch mode uses this same
-per-trade capture path after establishing its replay endpoint and readable day
-view, without requiring new user notes.
+Default capture-first runs `journal-annotate.mjs` during stage one, before notes
+are requested. It draws each position and compact BUY/SELL callouts, records
+native RR, captures one PNG per trade and removes its own marks. It restores
+starting symbol, timeframe and horizontal range; separately verify original
+user drawings and price scale before release. It caches candles once per
+underlying for the day. Replay must already include the final fill; one minute
+resolution must match the stored trades and the view must include their fills.
+
+Inspect `annotation-draft.json`, the prefilled `review.draft.json`, every PNG and
+every skip while chart access is still available. Automatic placement/property
+read-back do not prove clear labels, leaders, anchors or bands. Adjust unclear
+annotations and recapture affected images now; never certify unseen PNGs.
+The helper neither extracts nor excludes user commentary, so use the chart-text
+procedure first when necessary. For a legacy chart-note handoff this same helper
+runs only after notes have been read and recorded marks/commentary removed.
+Batch uses it after the authorized replay/day view has been established.
 
 For final journal screenshots, work one row at a time so run-created annotations
-never overlap another trade. Stage one instead retains all trades' drawings,
-with separate lanes and a whole-chart overlap check.
+never overlap another trade. Only the explicitly selected legacy handoff retains
+all trades on the live chart. Default continuation never invokes this helper.
 For each row, using a chronological copy of all imported transactions:
 
 1. Create one `long_position` for a Call or `short_position` for a Put. Start on
@@ -464,7 +511,9 @@ On a normal rerun, detect existing notes/media and enrich the same IDs without
 duplicating them.
 
 Complete the dated-video checks below, preserve daily resources, and read daily
-notes/resources and journal rows back. Restore the original TradingView view.
+notes/resources and journal rows back. Restore the original TradingView view
+before releasing it in stage one (or before release in batch/legacy mode), never
+at the end of a capture-first continuation.
 Report date, rows reviewed, tools/markers/charts/tags/notes/resources verified,
 each channel's video result, and every skip or unresolved item. Do not claim
 completion with required work unresolved. When only editing this workflow,

@@ -113,6 +113,15 @@ test('leader collision check catches a wick between clear endpoints in either di
   assert.equal(segmentIntersectsBox({x:0,y:100},{x:100,y:150},wick),false);
 });
 
+test('BUY and SELL in the same candle use distinct visible wick anchors',()=>{
+  const geometry={width:1000,height:600,bars:Array.from({length:40},(_,i)=>({time:t(i),x:100+i*20,highY:200,lowY:250}))};
+  const plan={id:2940,fills:[{time:t(12),side:'BUY',text:'BUY 1 @ $1.19',transaction_index:0},{time:t(12),side:'SELL',text:'SELL 1 @ $1.33',transaction_index:1}]};
+  const [buy,sell]=placeLabels(plan,geometry);
+  assert.equal(buy.anchor.y,258);assert.equal(sell.anchor.y,192);
+  assert.notDeepEqual(buy.anchor,sell.anchor);
+  for(const [a,b] of [[buy,sell],[sell,buy]])assert.equal(segmentIntersectsBox(a.anchor,a.label,{left:b.anchor.x-6,right:b.anchor.x+6,top:b.anchor.y-6,bottom:b.anchor.y+6}),false);
+});
+
 test('adjacent fill candles at a wide view retain visible anchors and clear leaders', () => {
   const geometry={width:1200,height:600,bars:Array.from({length:60},(_,i)=>({time:t(i),x:200+i*11,highY:120,lowY:160}))};
   const labels=placeLabels(planAnnotation(trade('Put'),bars,'1'),geometry);

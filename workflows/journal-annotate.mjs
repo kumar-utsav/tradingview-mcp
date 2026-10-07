@@ -170,6 +170,9 @@ export function placeLabels(plan, geometry) {
     const height = FILL_FONT_SIZE + 10;
     const found = [];
     for (const sign of [1, -1]) {
+      // Opposite fills in one candle need separate, visible wick anchors.
+      const opposite=plan.fills.some(other=>other.time===fill.time&&['BUY','SELL'].includes(other.side)&&other.side!==fill.side);
+      if(['BUY','SELL'].includes(fill.side)&&opposite&&sign!==(fill.side==='BUY'?1:-1))continue;
       const anchorY = sign === 1 ? anchor.lowY + 8 : anchor.highY - 8;
       for (const dy of distances) {
         for (const near of visible) {
@@ -395,6 +398,7 @@ export async function annotateSnapshot(snapshotPath, { outputDir=path.dirname(pa
   if (originalRange.from>first || originalRange.to<last) throw Error('The original chart view must include every trade; pan to the session before annotating');
   const range=originalRange;
   const annotated=[];const skipped=[];
+  const candleCache=new Map();
   try {
     for (const trade of trades) {
       try {
@@ -404,7 +408,8 @@ export async function annotateSnapshot(snapshotPath, { outputDir=path.dirname(pa
         if (state.symbol!==symbol) await setSymbol({symbol});
         await restoreExactRange(range);
         await sleep(350);
-        const candles=(await getOhlcv({count:2500})).bars;
+        if(!candleCache.has(symbol)) candleCache.set(symbol,(await getOhlcv({count:2500})).bars);
+        const candles=candleCache.get(symbol);
         const plan=planAnnotation(trade,candles,resolutions[0]);
         annotated.push(await renderTrade(plan,outputDir));
       } catch(error) { skipped.push({id:trade.id,reason:error.message}); }
