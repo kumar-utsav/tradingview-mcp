@@ -133,6 +133,13 @@ Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines')
 When the user says "capture backtest day" (including dictation variants), use
 `skills/capture-backtest-day/SKILL.md` and complete the chart, notes, checklist,
 tag verification in `workflows/capture-backtest-day.md`. The
+default is capture-first: capture all trades/screenshots/evidence locally,
+restore and release TradingView, then wait for numbered notes in chat without
+server writes. Do not extract or delete chart commentary as notes. On
+continuation, assemble notes with the saved trade-number/source-ID mapping,
+save and verify from that pack without accessing TradingView again. Require
+notes or explicit NO NOTE for every captured trade; never guess missing notes.
+Preserve existing pending legacy captures in their original mode. The
 user authorized this tagging workflow on 2026-09-21. The manually reviewed
 reference is `tag-audit-2026-09-21/`; current catalog definitions take precedence.
 

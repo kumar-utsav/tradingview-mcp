@@ -360,6 +360,28 @@ procedure first when necessary. For a legacy chart-note handoff this same helper
 runs only after notes have been read and recorded marks/commentary removed.
 Batch uses it after the authorized replay/day view has been established.
 
+The helper uses the same fail-closed position-isolation checks as backtest
+capture. It temporarily hides other Long/Short tools, verifies the current
+tool and every generated fill callout/leader are visible, and requires actual
+redraw rather than treating a timeout as success. It compares in-memory PNG
+hashes against a tools-hidden control, a multi-tool control when present, and
+previous accepted trade images. Repeated frames get at most three attempts;
+invalid, stale or duplicate images remain unresolved, never day-image fallbacks.
+Only an accepted PNG is written to the run directory. It restores prior tool
+visibility and attempts removal of every generated mark, independently checks
+none remain, and stops remaining captures on screenshot/restoration/cleanup
+failure. Retain recovery state and coordinate a new capture window; never seal,
+publish or announce successful release from a partial/failed run. New packs also
+reject identical images assigned to different trades; existing sealed packs are
+not rewritten. These checks apply to ordinary, batch and legacy screenshot
+passes that use this helper, and do not change RR, annotations or notes rules.
+
+View each final PNG before accepting it: exactly one matched position tool,
+every required fill callout and leader, no other trade's temporary marks, no
+free-form commentary, and readable entry/exit context. Distinct hashes and
+successful read-back do not prove rendered correctness. Do not set review flags
+or claim TradingView is released without this check and restoration verification.
+
 For final journal screenshots, work one row at a time so run-created annotations
 never overlap another trade. Only the explicitly selected legacy handoff retains
 all trades on the live chart. Default continuation never invokes this helper.

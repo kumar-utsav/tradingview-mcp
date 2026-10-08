@@ -44,6 +44,16 @@ test('does not seal unreviewed screenshots or a chart that is still occupied',as
   await assert.rejects(createPack(f.config,f.pack),/release verification/);
   await assert.rejects(fs.stat(f.pack),/ENOENT/);
 });
+test('does not seal identical screenshots for different imported trades',async t=>{
+  const f=await fixture(t);
+  const second=structuredClone(f.snapshot.trades[0]);second.id=2939;
+  f.snapshot.trades.push(second);f.snapshot.chart_hashes[2939]=null;
+  const row=structuredClone(f.review.trades[0]);row.id=2939;row.chart_path=path.join(f.dir,'trade-2939.png');
+  f.review.trades.push(row);await fs.writeFile(row.chart_path,image);
+  await write(f.config.snapshot_path,f.snapshot);await write(f.config.review_path,f.review);
+  await assert.rejects(createPack(f.config,f.pack),/Duplicate journal trade screenshots/);
+  await assert.rejects(fs.stat(f.pack),/ENOENT/);
+});
 test('changed fills and manual server charts require recapture coordination',async t=>{
   const f=await fixture(t);await createPack(f.config,f.pack);const notes=path.join(f.dir,'notes.json');await write(notes,{date,trades:[{number:1,trade_id:2938,text:'',no_note:true}]});
   const freshPath=path.join(f.dir,'fresh.json'),fresh=structuredClone(f.snapshot);fresh.trades[0].transactions[0].filledTime=`${date}T13:48:07Z`;await write(freshPath,fresh);

@@ -1,6 +1,6 @@
 interface:
   display_name: "Capture Backtest Day"
-  short_description: "Capture, review and verify trading records"
-  default_prompt: "Use $capture-backtest-day for the visible TradingView day."
+  short_description: "Capture trades first, then wait for chat notes"
+  default_prompt: "Use $capture-backtest-day: capture the visible day's trades, release TradingView, and wait for my numbered chat notes before saving."
 policy:
   allow_implicit_invocation: true

@@ -5,8 +5,8 @@ import { evaluate } from '../src/connection.js';
 import { getState, getVisibleRange, setSymbol } from '../src/core/chart.js';
 import { status as replayStatus } from '../src/core/replay.js';
 import { getOhlcv } from '../src/core/data.js';
-import { drawShape, getProperties, removeOne, setVisualOrder } from '../src/core/drawing.js';
-import { captureScreenshot } from '../src/core/capture.js';
+import { drawShape, getProperties, setVisualOrder } from '../src/core/drawing.js';
+import { captureJournalTradeImage, removeJournalAnnotations } from './journal-screenshot.mjs';
 import { reviewTemplate, entryCandleTime, positionRR, parsePositionRRLabel } from './journal-capture.mjs';
 
 const CHART = 'window.TradingViewApi._activeChartWidgetWV.value()';
@@ -80,6 +80,9 @@ export async function readPositionRR(entityId, {evaluateChart=evaluate}={}) {
     var view=views.find(function(v){return typeof v._createMiddleLabel==='function'});
     if(!view)throw Error('TradingView position-tool label reader is unavailable');
     var reader=Object.create(view);
+    // Newer renderers access pixel points before the first paint. The detached
+    // label reader needs only a harmless position; prices still come from source.
+    reader._points=[{x:0,y:0},{x:100,y:0}];
     reader._addCenterLabel=function(renderer,label,data){return data.txt};
     var label=view._createMiddleLabel.call(reader,{
       entryPrice:source.entryPrice(),profitPrice:source.profitPrice(),stopPrice:source.stopPrice(),
@@ -120,6 +123,8 @@ async function restoreExactRange(range) {
   // itself can represent future whitespace, so restore both logical endpoints.
   const result=await evaluate(`(function() {
     var c=${CHART},ts=c._chartWidget.model().timeScale();
+    var current=c.getVisibleRange();
+    if(current.from===${range.from}&&current.to===${range.to})return {actual:current};
     var left=ts.timePointToIndex(${range.from}),right=ts.timePointToIndex(${range.to});
     if(!Number.isFinite(left)||!Number.isFinite(right)||left>=right) return {error:'range cannot be mapped'};
     ts.zoomToBarsRange(left,right);
@@ -280,7 +285,7 @@ export function validatePositionPrices(plan, drawing, tickSize) {
   return { stop, target };
 }
 
-async function renderTrade(plan, outputDir) {
+async function renderTrade(plan, outputDir, seenImages) {
   const created = [];
   try {
     const geometry = await chartGeometry();
@@ -320,9 +325,9 @@ async function renderTrade(plan, outputDir) {
         side:p.side,quantity:p.quantity,price:p.price,filled_time:p.filled_time,text:p.text,
         candle_time:p.time,label_time:p.label.time,label_price:p.label.price});
     }
-    const shot=await captureScreenshot({region:'chart',filename:`journal-${plan.id}-${Date.now()}`,waitForRender:true});
+    const shot=await captureJournalTradeImage({tradeId:plan.id,positionId:position.entity_id,annotationIds:created,seenImages});
     const destination=path.join(outputDir,`trade-${plan.id}.png`);
-    await fs.copyFile(shot.file_path,destination,fs.constants.COPYFILE_EXCL);
+    await fs.writeFile(destination,shot.image,{flag:'wx'});
     const view=(await getVisibleRange()).visible_range;
     return {id:plan.id,chart_path:destination,position_entity_id:position.entity_id,position_start_candle_time:plan.start.time,
       position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,
@@ -330,9 +335,9 @@ async function renderTrade(plan, outputDir) {
       position_stop_price:plan.stop_price,stop_distance:STOP,position_rr:positionRRRead,position_tick_size:tickSize,
       position_stop_ticks:levels.stopLevel,position_profit_ticks:levels.profitLevel,
       resolution:plan.resolution,visible_range:view,transaction_markers:markers,
-      layout_automated:true,visual_review_required:true};
+      screenshot_checks:shot.screenshot_checks,layout_automated:true,visual_review_required:true};
   } finally {
-    for (const id of created.reverse()) await removeOne({entity_id:id});
+    await removeJournalAnnotations(created);
   }
 }
 
@@ -356,6 +361,7 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
       visible_range:result.visible_range,
       position_created_before_markers:true,
       markers_brought_to_front:true,
+      screenshot_checks:result.screenshot_checks,
     });
     for (const marker of a.transaction_markers) {
       const found=result.transaction_markers.find(item=>item.transaction_index===marker.transaction_index);
@@ -399,6 +405,7 @@ export async function annotateSnapshot(snapshotPath, { outputDir=path.dirname(pa
   const range=originalRange;
   const annotated=[];const skipped=[];
   const candleCache=new Map();
+  const seenImages=new Set();
   try {
     for (const trade of trades) {
       try {
@@ -411,8 +418,14 @@ export async function annotateSnapshot(snapshotPath, { outputDir=path.dirname(pa
         if(!candleCache.has(symbol)) candleCache.set(symbol,(await getOhlcv({count:2500})).bars);
         const candles=candleCache.get(symbol);
         const plan=planAnnotation(trade,candles,resolutions[0]);
-        annotated.push(await renderTrade(plan,outputDir));
-      } catch(error) { skipped.push({id:trade.id,reason:error.message}); }
+        annotated.push(await renderTrade(plan,outputDir,seenImages));
+      } catch(error) {
+        skipped.push({id:trade.id,reason:error.message});
+        if (error.captureUnsafe) {
+          for (const pending of trades.slice(trades.indexOf(trade)+1)) skipped.push({id:pending.id,reason:'Capture stopped after unverified screenshot or annotation cleanup; coordinate a new capture window'});
+          break;
+        }
+      }
     }
   } finally {
     try {

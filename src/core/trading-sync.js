@@ -403,6 +403,7 @@ export function createBacktestExtractionExpression(
   maxTrades = MAX_TRADES_BATCH,
   targetDate = null,
   includeAudit = false,
+  readChartNotes = true,
 ) {
   return `
   (function() {
@@ -725,7 +726,7 @@ export function createBacktestExtractionExpression(
         || left.source_id.localeCompare(right.source_id);
     });
     var notes = [];
-    for (var noteIndex = 0; noteIndex < allShapes.length; noteIndex++) {
+    for (var noteIndex = 0; ${readChartNotes ? 'true' : 'false'} && noteIndex < allShapes.length; noteIndex++) {
       var noteMeta = allShapes[noteIndex];
       if (noteMeta.name === 'long_position' || noteMeta.name === 'short_position') continue;
       if (!/text|note|callout|balloon/i.test(noteMeta.name || '')) continue;
@@ -1222,11 +1223,11 @@ export function beginPositionIsolationExpression(sessionKey) {
       if (sessions[key]) {
         return { success: false, error: 'Position isolation session already exists' };
       }
-      function propertyBoolean(value, fallback) {
+      function propertyBoolean(value) {
         if (value && typeof value.value === 'function') {
-          try { return Boolean(value.value()); } catch (error) {}
+          try { value = value.value(); } catch (error) { return null; }
         }
-        return value == null ? fallback : Boolean(value);
+        return typeof value === 'boolean' ? value : null;
       }
       var states = [];
       var shapes = chart.getAllShapes() || [];
@@ -1241,13 +1242,18 @@ export function beginPositionIsolationExpression(sessionKey) {
           };
         }
         var properties = shape.getProperties ? shape.getProperties() : {};
+        var visible = propertyBoolean(properties.visible);
+        if (visible === null) return {
+          success: false, error: 'Original position visibility could not be verified: ' + String(meta.id)
+        };
         states.push({
           id: String(meta.id),
-          visible: propertyBoolean(properties.visible, true)
+          visible: visible
         });
       }
       sessions[key] = { chart: chart, states: states };
-      return { success: true, positions: states.length };
+      return { success: true, positions: states.length,
+        visible_positions: states.filter(function(state) { return state.visible; }).length };
     })()
   `;
 }
@@ -1259,8 +1265,8 @@ export function showOnlyPositionExpression(sessionKey, targetDrawingId) {
       var sessions = window.__tradingviewMcpPositionIsolation || {};
       var saved = sessions[${JSON.stringify(sessionKey)}];
       if (!saved) return { success: false, error: 'Position isolation session was not found' };
-      var target = ${JSON.stringify(String(targetDrawingId))};
-      if (!saved.states.some(function(state) { return state.id === target; })) {
+      var target = ${JSON.stringify(targetDrawingId == null ? null : String(targetDrawingId))};
+      if (target !== null && !saved.states.some(function(state) { return state.id === target; })) {
         return { success: false, error: 'Target position drawing was not found: ' + target };
       }
       for (var index = 0; index < saved.states.length; index++) {
@@ -1269,20 +1275,31 @@ export function showOnlyPositionExpression(sessionKey, targetDrawingId) {
         if (!shape) return { success: false, error: 'Position drawing disappeared: ' + state.id };
         shape.setProperties({ visible: state.id === target }, false);
       }
-      await new Promise(function(resolve) {
+      var painted = await new Promise(function(resolve) {
         var finished = false;
-        function finish() {
+        function finish(painted) {
           if (finished) return;
           finished = true;
           clearTimeout(timeout);
-          resolve();
+          resolve(painted);
         }
-        var timeout = setTimeout(finish, 250);
-        if (typeof window.requestAnimationFrame !== 'function') return;
+        var timeout = setTimeout(function() { finish(false); }, 2000);
+        if (typeof window.requestAnimationFrame !== 'function') { finish(false); return; }
         window.requestAnimationFrame(function() {
-          window.requestAnimationFrame(finish);
+          window.requestAnimationFrame(function() { finish(true); });
         });
       });
+      if (!painted) return { success: false, error: 'TradingView did not redraw; keep the capture tab active and retry' };
+      for (var check = 0; check < saved.states.length; check++) {
+        var expected = saved.states[check];
+        var current = saved.chart.getShapeById(expected.id);
+        var properties = current && current.getProperties ? current.getProperties() : {};
+        var visible = properties.visible;
+        if (visible && typeof visible.value === 'function') visible = visible.value();
+        if (typeof visible !== 'boolean' || visible !== (expected.id === target)) {
+          return { success: false, error: 'Position visibility could not be verified: ' + expected.id };
+        }
+      }
       return { success: true, visible_drawing_id: target };
     })()
   `;
@@ -1306,21 +1323,32 @@ export function restorePositionIsolationExpression(sessionKey) {
         }
         shape.setProperties({ visible: state.visible }, false);
       }
-      await new Promise(function(resolve) {
+      var painted = await new Promise(function(resolve) {
         var finished = false;
-        function finish() {
+        function finish(painted) {
           if (finished) return;
           finished = true;
           clearTimeout(timeout);
-          resolve();
+          resolve(painted);
         }
-        var timeout = setTimeout(finish, 250);
-        if (typeof window.requestAnimationFrame !== 'function') return;
+        var timeout = setTimeout(function() { finish(false); }, 2000);
+        if (typeof window.requestAnimationFrame !== 'function') { finish(false); return; }
         window.requestAnimationFrame(function() {
-          window.requestAnimationFrame(finish);
+          window.requestAnimationFrame(function() { finish(true); });
         });
       });
-      delete sessions[key];
+      for (var check = 0; check < saved.states.length; check++) {
+        var expected = saved.states[check];
+        var current = saved.chart.getShapeById(expected.id);
+        var properties = current && current.getProperties ? current.getProperties() : {};
+        var visible = properties.visible;
+        if (visible && typeof visible.value === 'function') visible = visible.value();
+        if (typeof visible !== 'boolean' || visible !== expected.visible) {
+          if (missing.indexOf(expected.id) === -1) missing.push(expected.id);
+        }
+      }
+      if (!painted) return { success: false, error: 'TradingView did not redraw restored position visibility' };
+      if (!missing.length) delete sessions[key];
       return missing.length
         ? { success: false, error: 'Some position drawings could not be restored', missing: missing }
         : { success: true, restored: saved.states.length };
@@ -1328,7 +1356,7 @@ export function restorePositionIsolationExpression(sessionKey) {
   `;
 }
 
-async function captureIsolatedTradeScreenshots(trades, inventory, deps) {
+async function captureIsolatedTradeScreenshots(trades, inventory, deps, dayScreenshot) {
   if (!trades.length) return [];
   const drawingIds = new Map(
     inventory.map((position) => [position.source_id, position.drawing_id]),
@@ -1355,14 +1383,30 @@ async function captureIsolatedTradeScreenshots(trades, inventory, deps) {
   const screenshots = [];
   let captureError;
   try {
+    // A tools-hidden control catches stale frames even for a single-trade day.
+    const hidden = await deps.evaluateAsync(showOnlyPositionExpression(sessionKey, null));
+    if (!hidden?.success) throw new Error(hidden?.error || "Position visibility could not be verified");
+    const hiddenImage = await deps.captureScreenshot(deps.evaluate);
+    if (!hiddenImage) throw new Error("Tools-hidden control screenshot was empty");
+    const seenImages = new Set([hiddenImage]);
+    if (started.visible_positions > 1 && dayScreenshot) seenImages.add(dayScreenshot);
     for (const target of targets) {
-      const isolated = await deps.evaluateAsync(
-        showOnlyPositionExpression(sessionKey, target.drawing_id),
-      );
-      if (!isolated?.success) {
-        throw new Error(isolated?.error || "A trade position could not be isolated");
+      let base64;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const isolated = await deps.evaluateAsync(
+          showOnlyPositionExpression(sessionKey, target.drawing_id),
+        );
+        if (!isolated?.success) {
+          throw new Error(isolated?.error || "A trade position could not be isolated");
+        }
+        base64 = await deps.captureScreenshot(deps.evaluate);
+        if (base64 && !seenImages.has(base64)) break;
+        base64 = null;
       }
-      const base64 = await deps.captureScreenshot(deps.evaluate);
+      if (!base64) throw new Error(
+        `Individual trade screenshot did not change for ${target.source_id}; capture stopped instead of accepting a stale, duplicate or full-day image`,
+      );
+      seenImages.add(base64);
       screenshots.push({
         source_id: target.source_id,
         screenshot: { mime_type: "image/png", base64 },
@@ -1385,7 +1429,7 @@ async function captureIsolatedTradeScreenshots(trades, inventory, deps) {
   return screenshots;
 }
 
-async function readBacktestDay(date, deps) {
+async function readBacktestDay(date, deps, readChartNotes = true) {
   const captureDate =
     date || (await deps.evaluateAsync(selectBacktestDateExpression()));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(captureDate || "")) {
@@ -1394,8 +1438,8 @@ async function readBacktestDay(date, deps) {
 
   const [inventory, extraction, dailyNotes, screenshotContext] = await Promise.all([
     deps.evaluate(dayPositionInventoryExpression(captureDate)),
-    deps.evaluate(createBacktestExtractionExpression(null, captureDate, true)),
-    deps.evaluate(dayNotesExtractionExpression(captureDate)),
+    deps.evaluate(createBacktestExtractionExpression(null, captureDate, true, readChartNotes)),
+    readChartNotes ? deps.evaluate(dayNotesExtractionExpression(captureDate)) : {count:0,note:null},
     deps.evaluate(dayScreenshotContextExpression(captureDate)),
   ]);
   if (!screenshotContext?.date_visible) {
@@ -1406,6 +1450,10 @@ async function readBacktestDay(date, deps) {
   let trades = (extraction?.trades || []).filter(
     (trade) => trade.chart_date === captureDate,
   );
+  if (!readChartNotes) {
+    trades = trades.map(trade => ({...trade, notes:''}));
+    extraction.note_audit = [];
+  }
   try {
     const labels = await deps.getPineLabels({ max_labels: 250 });
     trades = enrichTradesWithStudyLabels(trades, labels);
@@ -1447,6 +1495,7 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
       trades,
       inventory,
       deps,
+      base64,
     );
   } catch (error) {
     const restored = await restoreAssignedTradeNotes(noteRemoval, deps).catch(
@@ -1555,14 +1604,16 @@ export async function captureBacktestDay({ date, idempotencyKey, _deps } = {}) {
 
 // This evidence is written locally, not sent as an unbounded MCP response.
 // Never load more history, move replay or switch studies during the freeze.
-export function frozenChartEvidenceExpression(date, identityOnly = false) {
+export function frozenChartEvidenceExpression(date, identityOnly = false, includeCommentary = true) {
   return `(function() {
     /* backtest-frozen-evidence */
     var chart = window.TradingViewApi.activeChart
       ? window.TradingViewApi.activeChart() : ${CHART_API};
     if (!chart) throw new Error('No active chart found');
     var symbol = chart.symbolExt();
-    var shapes = (chart.getAllShapes() || []).map(function(meta) {
+    var shapes = (chart.getAllShapes() || []).filter(function(meta) {
+      return ${includeCommentary ? 'true' : 'false'} || !/text|note|callout|balloon/i.test(meta.name);
+    }).map(function(meta) {
       var shape = chart.getShapeById(meta.id);
       return {id:String(meta.id), name:meta.name,
         points:shape.getPoints ? shape.getPoints() : [],
@@ -1602,13 +1653,15 @@ export function frozenChartEvidenceExpression(date, identityOnly = false) {
 }
 
 /** Short chart-only phase. persist must durably save recovery before note removal. */
-export async function freezeBacktestDay({ date, persist, _deps } = {}) {
+export async function freezeBacktestDay({ date, persist, notesMode = 'chart', _deps } = {}) {
+  if (!['chart','chat'].includes(notesMode)) throw new Error('Unknown notes mode');
+  const readChartNotes = notesMode === 'chart';
   if (typeof persist !== 'function') throw new Error('A durable evidence writer is required');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('An explicit chart date is required');
   const deps = dependencies(_deps);
-  const identity = JSON.stringify(await deps.evaluate(frozenChartEvidenceExpression(date, true)));
+  const identity = JSON.stringify(await deps.evaluate(frozenChartEvidenceExpression(date, true, readChartNotes)));
   async function unchanged() {
-    const current = await deps.evaluate(frozenChartEvidenceExpression(date, true));
+    const current = await deps.evaluate(frozenChartEvidenceExpression(date, true, readChartNotes));
     if (JSON.stringify(current) !== identity) {
       const error = new Error('Chart changed during capture; do not release it or mix the screenshots. Recovery files are retained.');
       error.chartChanged = true;
@@ -1618,17 +1671,17 @@ export async function freezeBacktestDay({ date, persist, _deps } = {}) {
   // Preserve the original annotated chart before cleaning assigned notes.
   const annotated = {mime_type:'image/png', base64:await deps.captureScreenshot(deps.evaluate)};
   if (!annotated.base64) throw new Error('Annotated screenshot was empty');
-  const evidence = await deps.evaluate(frozenChartEvidenceExpression(date));
+  const evidence = await deps.evaluate(frozenChartEvidenceExpression(date, false, readChartNotes));
   if (JSON.stringify(evidence.identity) !== identity) throw new Error('Chart changed during the annotated capture; keep it unchanged and retry');
   await unchanged();
-  const day = await readBacktestDay(date, deps);
+  const day = await readBacktestDay(date, deps, readChartNotes);
   const graphics = {};
   for (const [name, read] of [['labels',deps.getPineLabels],['boxes',deps.getPineBoxes],['lines',deps.getPineLines]]) {
     try { graphics[name] = await read({max_labels:50}); }
     catch (error) { graphics[name] = {success:false, error:error.message}; }
   }
   await unchanged();
-  const bundle = {version:1, idempotency_key:randomUUID(), frozen_at:new Date().toISOString(),
+  const bundle = {version:1, notes_mode:notesMode, idempotency_key:randomUUID(), frozen_at:new Date().toISOString(),
     evidence:{...evidence,graphics}, annotated_screenshot:annotated,
     note_audit:day.extraction?.note_audit || [],
     payload:{capture_date:date,positions_found:day.inventory.length,trades:day.trades,
@@ -1651,7 +1704,7 @@ export async function freezeBacktestDay({ date, persist, _deps } = {}) {
     await unchanged();
     removal = await removeAssignedTradeNotes(day.noteCandidates,deps);
     bundle.payload.screenshot = {mime_type:'image/png',base64:await screenshotDeps.captureScreenshot()};
-    bundle.payload.trade_screenshots = await captureIsolatedTradeScreenshots(day.trades,day.inventory,screenshotDeps);
+    bundle.payload.trade_screenshots = await captureIsolatedTradeScreenshots(day.trades,day.inventory,screenshotDeps,bundle.payload.screenshot.base64);
     bundle.trade_notes_deleted = removal ? day.noteCandidates.length : 0;
     await unchanged();
     await persist('frozen',bundle);

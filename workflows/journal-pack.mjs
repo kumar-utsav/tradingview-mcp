@@ -54,6 +54,7 @@ export async function createPack(config,outputDir) {
   }
   checkEvidence(evidence,snapshot,review);
   const images=await Promise.all(review.trades.map(async row=>{const bytes=await fs.readFile(row.chart_path);if(!png(bytes))throw Error(`PNG required: ${row.id}`);return {id:row.id,bytes,sha256:hash(bytes)};}));
+  if(new Set(images.map(image=>image.sha256)).size!==images.length)throw Error('Duplicate journal trade screenshots: inspect and recapture before sealing a new pack');
   const ordered=[...snapshot.trades].sort((a,b)=>Math.min(...a.transactions.map(t=>Date.parse(t.filledTime)))-Math.min(...b.transactions.map(t=>Date.parse(t.filledTime)))||a.id-b.id).map((t,i)=>({number:i+1,trade_id:t.id,entry_candle:t.entry_candle,ticker:t.ticker,type:t.type}));
   const packDir=path.resolve(outputDir);
   await fs.mkdir(path.dirname(packDir),{recursive:true});

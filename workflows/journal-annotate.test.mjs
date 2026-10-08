@@ -3,9 +3,79 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { planAnnotation, placeLabels, prefillReview, positionToolLevels, validatePositionPrices, segmentIntersectsBox, preservePositionAnchors } from './journal-annotate.mjs';
+import { captureJournalTradeImage, removeJournalAnnotations } from './journal-screenshot.mjs';
 
 const at = minute => new Date(Date.parse('2026-09-24T14:00:00Z') + minute * 60000).toISOString();
 const t = minute => Math.floor(Date.parse(at(minute)) / 1000);
+const pngFrame = text => Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from(text)]);
+function screenshotFixture(frames=['all','hidden','trade']) {
+  const visibility=new Map([['position',true],['user-position',true],['user-hidden',false],['marker',true],['leader',true]]);
+  const names={position:'long_position','user-position':'short_position','user-hidden':'long_position',marker:'text',leader:'trend_line'};
+  const chart={getAllShapes:()=>[...visibility.keys()].map(id=>({id,name:names[id]})),
+    getShapeById:id=>visibility.has(id)?{getProperties:()=>({visible:visibility.get(id)}),setProperties:p=>visibility.set(id,p.visible)}:null};
+  const window={requestAnimationFrame:cb=>cb(),TradingViewApi:{activeChart:()=>chart,_activeChartWidgetWV:{value:()=>chart}}};
+  const execute=expression=>new Function('window',`return (${expression});`)(window);
+  let captures=0;
+  const deps={evaluate:async expression=>execute(expression),evaluateAsync:async expression=>execute(expression),
+    capture:async()=>{captures++;return pngFrame(frames.shift() || 'stuck');}};
+  const input={tradeId:1,positionId:'position',annotationIds:['position','marker','leader'],seenImages:new Set()};
+  return {deps,input,visibility,window,captures:()=>captures};
+}
+
+test('journal capture isolates one tool, keeps fill marks, and restores user visibility',async()=>{
+  const f=screenshotFixture();
+  const result=await captureJournalTradeImage(f.input,f.deps);
+  assert.deepEqual(result.image,pngFrame('trade'));assert.equal(result.screenshot_checks.attempts,1);
+  assert.equal(f.visibility.get('user-position'),true);assert.equal(f.visibility.get('user-hidden'),false);
+  assert.equal(f.visibility.get('marker'),true);assert.equal(f.input.seenImages.size,1);
+});
+test('journal capture retries a stale frame before accepting a new one',async()=>{
+  const f=screenshotFixture(['all','hidden','hidden','trade']);
+  const result=await captureJournalTradeImage(f.input,f.deps);
+  assert.equal(result.screenshot_checks.attempts,2);assert.equal(f.captures(),4);
+});
+test('journal capture rejects persistent full-day and tools-hidden frames',async()=>{
+  for(const frame of ['all','hidden']) {
+    const f=screenshotFixture(['all','hidden',frame,frame,frame]);
+    await assert.rejects(captureJournalTradeImage(f.input,f.deps),error=>error.captureUnsafe&&/stale, duplicate or multi-tool/.test(error.message));
+    assert.equal(f.visibility.get('user-position'),true);assert.equal(f.input.seenImages.size,0);
+  }
+});
+test('journal capture rejects a previous trade image and empty screenshots',async()=>{
+  const f=screenshotFixture(['all','hidden','trade']);
+  await captureJournalTradeImage(f.input,f.deps);
+  f.deps.capture=async()=>pngFrame('trade');
+  await assert.rejects(captureJournalTradeImage({...f.input,tradeId:2},f.deps),/duplicate/);
+  f.deps.capture=async()=>Buffer.alloc(0);
+  await assert.rejects(captureJournalTradeImage(f.input,f.deps),/empty or not a PNG/);
+});
+test('journal capture fails when a fill annotation is hidden or isolation is ignored',async()=>{
+  const f=screenshotFixture();f.visibility.set('marker',false);
+  await assert.rejects(captureJournalTradeImage(f.input,f.deps),/callout or leader visibility/);
+  assert.equal(f.visibility.get('user-position'),true);
+  const g=screenshotFixture(),read=g.deps.evaluate;
+  g.deps.evaluateAsync=async expression=>expression.includes('isolation-show')?{success:true}:read(expression);
+  // The real visibility checker below is tested by the backtest suite; here a stuck
+  // renderer must still be rejected even when an upstream mock reports success.
+  g.deps.capture=async()=>pngFrame('all');
+  await assert.rejects(captureJournalTradeImage(g.input,g.deps),/multi-tool/);
+});
+test('journal capture never accepts a PNG when original visibility restoration fails',async()=>{
+  const f=screenshotFixture(),read=f.deps.evaluateAsync;
+  f.deps.evaluateAsync=async expression=>expression.includes('isolation-restore')?{success:false}:read(expression);
+  await assert.rejects(captureJournalTradeImage(f.input,f.deps),error=>error.captureUnsafe&&/could not be restored/.test(error.message));
+  assert.equal(f.input.seenImages.size,0);
+});
+test('journal cleanup attempts every mark and independently detects a leftover',async()=>{
+  const remaining=new Set(['position','marker','leader']),attempts=[];
+  await assert.rejects(removeJournalAnnotations([...remaining],{
+    remove:async({entity_id})=>{attempts.push(entity_id);if(entity_id==='leader')throw Error('remove failed');remaining.delete(entity_id);},
+    evaluate:async()=>[...remaining],
+  }),error=>error.captureUnsafe&&/leader/.test(error.message));
+  assert.deepEqual(attempts,['leader','marker','position']);
+  await removeJournalAnnotations([...remaining],{remove:async({entity_id})=>remaining.delete(entity_id),evaluate:async()=>[...remaining]});
+  assert.equal(remaining.size,0);
+});
 const bars = [
   {time:t(-1),high:100.4,low:100.1,open:100.2,close:100.3},
   {time:t(0),high:100.5,low:100,open:100.2,close:100.3},

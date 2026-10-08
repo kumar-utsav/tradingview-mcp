@@ -310,6 +310,57 @@ describe("Trading backtest batch capture sync", () => {
     });
   });
 
+  it("refuses isolation when the visibility setter silently does nothing", async () => {
+    const chart = {
+      getAllShapes: () => [{id:'one',name:'long_position'},{id:'two',name:'short_position'}],
+      getShapeById: () => ({getProperties:()=>({visible:true}),setProperties:()=>{}}),
+    };
+    const window = {TradingViewApi:{activeChart:()=>chart},requestAnimationFrame:cb=>cb()};
+    const run = expression => new Function('window',`return (${expression});`)(window);
+    assert.equal(run(beginPositionIsolationExpression('ignored')).success,true);
+    const result = await run(showOnlyPositionExpression('ignored','one'));
+    assert.equal(result.success,false);assert.match(result.error,/visibility could not be verified/);
+    assert.equal((await run(restorePositionIsolationExpression('ignored'))).success,true);
+  });
+
+  it("refuses to hide tools when their original visibility cannot be read", () => {
+    const chart={getAllShapes:()=>[{id:'one',name:'short_position'}],
+      getShapeById:()=>({getProperties:()=>({}),setProperties:()=>assert.fail('Must not hide unknown state')})};
+    const window={TradingViewApi:{activeChart:()=>chart}};
+    const result=new Function('window',`return (${beginPositionIsolationExpression('unknown')});`)(window);
+    assert.equal(result.success,false);assert.match(result.error,/Original position visibility/);
+    assert.equal(window.__tradingviewMcpPositionIsolation.unknown,undefined);
+  });
+
+  it("does not treat a redraw timeout as successful isolation", async () => {
+    let visible=true;
+    const chart = {
+      getAllShapes:()=>[{id:'one',name:'long_position'}],
+      getShapeById:()=>({getProperties:()=>({visible}),setProperties:p=>{visible=p.visible;}}),
+    };
+    const window={TradingViewApi:{activeChart:()=>chart},requestAnimationFrame:()=>{}};
+    new Function('window',`return (${beginPositionIsolationExpression('timeout')});`)(window);
+    const run = new Function('window','setTimeout','clearTimeout',`return (${showOnlyPositionExpression('timeout',null)});`);
+    const result = await run(window,cb=>{cb();return 1;},()=>{});
+    assert.equal(result.success,false);assert.match(result.error,/did not redraw/);
+  });
+
+  it("keeps the recovery session when restored visibility cannot be verified", async () => {
+    let visible=true,ignore=false;
+    const chart={getAllShapes:()=>[{id:'one',name:'long_position'}],
+      getShapeById:()=>({getProperties:()=>({visible}),setProperties:p=>{if(!ignore)visible=p.visible;}})};
+    const window={TradingViewApi:{activeChart:()=>chart},requestAnimationFrame:cb=>cb()};
+    const run=expression=>new Function('window',`return (${expression});`)(window);
+    run(beginPositionIsolationExpression('restore'));
+    assert.equal((await run(showOnlyPositionExpression('restore',null))).success,true);
+    ignore=true;
+    assert.equal((await run(restorePositionIsolationExpression('restore'))).success,false);
+    assert.ok(window.__tradingviewMcpPositionIsolation.restore);
+    ignore=false;
+    assert.equal((await run(restorePositionIsolationExpression('restore'))).success,true);
+    assert.equal(visible,true);
+  });
+
   it("matches numbered notes to trades from earliest to latest and strips the prefix", () => {
     const firstEntry = 1785591300;
     const secondEntry = firstEntry + 240;
@@ -631,6 +682,7 @@ describe("Trading backtest batch capture sync", () => {
     withConfiguration(async () => {
       const requests = [];
       const actions = [];
+      let imageNumber = 0;
       const dayTrade = {
         ...backtestTrade,
         source_id: "/chart/test-layout/::position-1",
@@ -702,7 +754,7 @@ describe("Trading backtest batch capture sync", () => {
         },
         captureScreenshot: async () => {
           actions.push("screenshot");
-          return "cG5n";
+          return Buffer.from(`image-${++imageNumber}`).toString('base64');
         },
         getPineLabels: async () => ({ success: true, studies: [] }),
         resourceFetch: async () =>
@@ -753,10 +805,12 @@ describe("Trading backtest batch capture sync", () => {
       assert.equal(firstResult.tag_review.chart_review_required, true);
       assert.equal(firstResult.tag_review.workflow_complete, false);
       assert.match(firstResult.tag_review.next_action, /verify exact tags/);
-      assert.deepEqual(actions.slice(0, 8), [
+      assert.deepEqual(actions.slice(0, 10), [
         "delete",
         "screenshot",
         "begin-isolation",
+        "isolate",
+        "screenshot",
         "isolate",
         "screenshot",
         "restore-positions",
@@ -840,7 +894,7 @@ describe("Trading backtest batch capture sync", () => {
             },
             captureScreenshot: async () => {
               actions.push("screenshot");
-              return "cG5n";
+              return Buffer.from(`image-${actions.length}`).toString('base64');
             },
             getPineLabels: async () => ({ success: true, studies: [] }),
             resourceFetch: async () => youtubeResponse(youtubeHtml()),
@@ -856,6 +910,8 @@ describe("Trading backtest batch capture sync", () => {
         "delete",
         "screenshot",
         "begin-isolation",
+        "isolate",
+        "screenshot",
         "isolate",
         "screenshot",
         "restore-positions",

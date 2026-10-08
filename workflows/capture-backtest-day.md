@@ -1,6 +1,6 @@
 # Capture backtest day
 
-## Fast, safe execution
+## Stage 1: capture all trades, then wait for chat notes
 
 Read TradingView state once to identify the chart date, ticker and timeframe.
 Ask the user to keep the chart unchanged only for the brief capture phase. Do
@@ -8,31 +8,87 @@ not start app snapshots or tag review yet. From this project,
 freeze into a new, unique audit directory:
 
 ```sh
-node workflows/backtest-freeze.mjs freeze YYYY-MM-DD backtest-captures/YYYY-MM-DD-HHMMSS
+node workflows/backtest-freeze.mjs freeze-chat YYYY-MM-DD backtest-captures/YYYY-MM-DD-HHMMSS
 ```
 
-The helper captures `annotated-start.png` before cleaning assigned notes. It
-saves original drawing text/geometry, notes, loaded OHLCV and Pine graphics into
-`recovery.json` before any note removal. It then captures the clean `day.png` and
-isolated `position-N.png` images, restores position visibility, durably writes
-`frozen.json` and `chart-evidence.json`, finalizes note cleanup, and writes the
-checksum-bound `chart-ready.json`. A failed phase must not release the chart or
-claim capture success. Numbered text notes map to chronological trades, `DAY:`
-text maps to the daily note, and ambiguous assignments/skipped positions remain
-reported rather than guessed.
+The helper captures `annotated-start.png` first, then freezes structural drawing
+geometry, loaded OHLCV and Pine graphics in `recovery.json`. It captures `day.png`
+and isolated `position-N.png` images, restores position visibility, and durably
+writes `frozen.json`, `chart-evidence.json`, `pending-notes.json` and the
+checksum-bound `chart-ready.json`. It does not extract, assign or delete chart
+commentary; captured notes start empty. Existing commentary may be visible in
+images but must not be read as user notes. Structural zone/level labels remain
+usable evidence. A failed phase must not release the chart or claim success.
+Report skipped positions rather than silently declaring all trades captured.
 
-Immediately after a successful result with `chart_released: true`, send:
-"Chart evidence secured—you can move on in TradingView now. Saving and review
-continue from the captured material." This means the local evidence is safe,
-not that ingestion or tag review has finished. There is no promise of
+Isolation must fail closed: verify position visibility, wait for actual redraw,
+and compare each image with a tools-hidden control, earlier trade images, and
+the original day image when it had multiple visible tools. The helper retries
+repeated frames at most three times, restores visibility, and stops without
+sealing a successful pack if checks fail. Never substitute the day image.
+
+Before announcing release, actually view every local `position-N.png`. Each must
+show only its mapped Long/Short tool, with entry, relevant price action and zones
+visible. Distinct bytes and API visibility checks alone are not visual proof.
+If any image still shows multiple tools, the wrong trade or no tool, report the
+failed capture and retain recovery files; do not publish, accept it as a fallback,
+or claim successful capture. A retry after release requires a new coordinated
+chart window; do not touch the user's new chart work.
+
+After a successful result with `chart_released: true` and this image check, send:
+"All captured trade evidence is secured—you can move on in TradingView now.
+Nothing has been saved to the server yet. Send your numbered notes below."
+Present the fixed numbered list from `pending-notes.json`, including direction,
+ticker and entry/exit times (use the frozen Pacific times; do not reinterpret
+already formatted candle times).
+Ask for `1: ...`, `2: ...`, optional `DAY: ...`, and explicit `N: NO NOTE` for any
+trade intentionally without notes. Then END THE TURN and wait. Do not perform
+ingestion or tag writes before receiving complete notes. There is no promise of
 zero delay: all required live-chart evidence must finish before release.
 
-From this point, NEVER read/mutate the live chart, move replay, restore the old
+## Stage 2: assemble chat notes and save from the pack
+
+On continuation, locate the matching pending run and confirm its date and
+numbered mapping. If multiple runs could match, ask which one. New chart work
+does not invalidate a captured pack. An explicit new capture uses a new pack;
+never overwrite an earlier pending run. Preserve partial chat notes and ask only
+for missing or ambiguous numbers. Silence is not NO NOTE. Do not substitute
+chart commentary or invent note text. A note-only follow-up resumes the pending
+capture; it does not authorize capturing today's newly visible chart.
+
+From release onward, NEVER read/mutate the live chart, move replay, restore the old
 view, or invoke Undo. Do not call `capture_backtest_day` to publish or retry: it
-would capture the user's next chart. Take the app's pre-ingestion recovery
-snapshot in the SAME frozen directory, then publish the frozen bundle:
+would capture the user's next chart. Once all captured trades have explicit
+notes or NO NOTE, create a local `notes-input.json` using the exact source IDs
+from `pending-notes.json` and the user's verbatim text:
+
+```json
+{
+  "date": "YYYY-MM-DD",
+  "trades": [
+    {"number": 1, "source_id": "exact-frozen-source-id", "text": "User's notes"},
+    {"number": 2, "source_id": "another-frozen-source-id", "no_note": true}
+  ],
+  "daily": "Optional DAY note from chat"
+}
+```
+
+Do not invent a daily note when none was supplied. The assembler requires exact
+date, unique mapped numbers, full coverage, and nonempty notes or explicit
+`no_note: true`. It seals `chat-notes.json`, `assembled.json` and
+`notes-ready.json` without accessing TradingView or the server. Only notes and
+the daily note may change; screenshots, trade facts and the retry key stay fixed.
+Assemble only after notes are complete. Sealed files are immutable; preserve
+them on errors and inspect a partial seal before retrying, never overwrite it
+or silently recapture. Before publication, any requested note revision needs
+an explicitly coordinated replacement assembly; never reuse a published key
+with changed notes.
+
+Take the app's pre-ingestion recovery snapshot in the SAME frozen directory,
+then publish the assembled bundle:
 
 ```sh
+node workflows/backtest-freeze.mjs assemble /absolute/run/directory /absolute/run/directory/notes-input.json
 node workflows/verify-tags.mjs snapshot YYYY-MM-DD /absolute/run/directory
 node workflows/backtest-freeze.mjs publish /absolute/run/directory
 ```
@@ -40,12 +96,15 @@ node workflows/backtest-freeze.mjs publish /absolute/run/directory
 The snapshot batches records, live catalog/groups, daily notes/resources, and
 bounded parallel recovery-image reads into `before.json`; do not publish unless
 it succeeds. Publishing validates the ready marker, bundle checksum and snapshot
-date, then sends saved images/notes with the frozen idempotency key. Retain all
+date and complete sealed chat notes, then sends saved images/notes with the
+original idempotency key. Retain all
 recovery files on failure and retry publishing the SAME bundle/key, not a new
-chart capture. Rejected/duplicate trades with removed notes produce
-`note_recovery_required`; report this and retain the original notes locally.
+chart capture. Rejected/duplicate trades can produce
+`note_recovery_required`; report this and retain the chat notes locally.
 Restoration after release requires explicit user direction, never automatic
-Undo over new chart work. Resolve skipped positions, ambiguous notes and
+Undo over new chart work. Existing pending legacy `freeze` chart-notes runs may
+finish in their original mode; all new runs use `freeze-chat`. Resolve skipped
+positions, ambiguous notes and
 duplicates without guessing. Next create the post-capture review manifest:
 
 ```sh
@@ -65,8 +124,9 @@ its capture/tag updates, not broker orders, commits, or deployment.
 ## Evidence review
 
 Actually view `annotated-start.png`, `day.png`, each `position-N.png`, and every
-saved app trade image; read every trade note, daily note, and chart
-text. Downloads are not inspection. Match each record to entry time and drawing.
+saved app trade image; read every supplied chat trade note and daily note, and
+structural chart labels. Do not read chart commentary as trade/daily notes.
+Downloads are not inspection. Match each record to entry time and drawing.
 Charts must show enough pre-entry history, entry, zones, and relevant levels. A
 1m image cannot prove a 2m trigger. If an image is absent, retry
 `GET /backtest/:id/image`; the MCP missing-image flag was incorrect in the

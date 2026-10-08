@@ -22,6 +22,11 @@ continuation or a changed chart cannot lose the screenshots/evidence.
    capture and visually accept its commentary-free PNG, then remove its own
    marks. Correct unclear captures now. Restore/verify original chart, user
    drawings and price scale, then disconnect.
+   Use the helper's fail-closed screenshot checks: verify only the matched tool
+   and all its fill marks are visible, require redraw, reject persistent stale
+   or duplicate frames, and verify temporary-mark removal. Never substitute a
+   full-day PNG or claim release when capture/cleanup is unresolved. Visual
+   inspection remains required even when the automatic checks pass.
    Use `journal-pack.mjs create` to seal the accepted PNGs/RR, evidence and
    mapping into a Desktop capture pack with a gallery and `notes.md`. Then say
    **TradingView is free to use**, link/open the pack and ask for numbered notes in chat or that file, then **continue**.
