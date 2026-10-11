@@ -11,6 +11,15 @@ register('replay', {
       },
       handler: (opts) => core.start({ date: opts.date }),
     }],
+    ['cutoff', {
+      description: 'Replay a date through the 6:30 AM or 9:00 AM Pacific candle',
+      handler: (_opts, positionals) => {
+        const [date, cutoff, ...extra] = positionals;
+        if (!date || !cutoff || extra.length || !['open', 'morning'].includes(cutoff))
+          throw new Error('Usage: tv replay cutoff YYYY-MM-DD open|morning (open=6:30 AM, morning=9:00 AM Pacific)');
+        return core.startToCutoff({ date, cutoff });
+      },
+    }],
     ['step', {
       description: 'Advance one bar in replay',
       handler: () => core.step(),

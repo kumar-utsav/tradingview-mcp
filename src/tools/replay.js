@@ -3,6 +3,14 @@ import { jsonResult } from './_format.js';
 import * as core from '../core/replay.js';
 
 export function registerReplayTools(server) {
+  server.tool('replay_to_session_cutoff', 'Replay the current chart to a date and stop at either 6:30 AM or 9:00 AM Pacific. The cutoff candle is included.', {
+    date: z.string().describe('Trading date in YYYY-MM-DD format'),
+    cutoff: z.enum(['open', 'morning']).describe('Choose open for 6:30 AM Pacific, or morning for 9:00 AM Pacific'),
+  }, async ({ date, cutoff }) => {
+    try { return jsonResult(await core.startToCutoff({ date, cutoff })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('replay_start', 'Start bar replay mode, optionally at a specific date', {
     date: z.string().optional().describe('Date to start replay from (YYYY-MM-DD format). If omitted, selects first available date.'),
   }, async ({ date }) => {

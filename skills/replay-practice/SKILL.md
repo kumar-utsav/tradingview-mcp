@@ -13,6 +13,11 @@ You are guiding the user through replay-mode practice trading on TradingView.
 2. `chart_set_timeframe` — set the trading timeframe
 3. `replay_start` with a date — enter replay mode at the starting point
 
+For a dated SPY session review with a fixed endpoint, use `replay_to_session_cutoff`
+with the date (`YYYY-MM-DD`) and choose `open` for 6:30 AM Pacific or `morning`
+for 9:00 AM Pacific. The requested cutoff candle is included, and replay remains
+paused. This shortcut is for the current chart and does not change its symbol or timeframe.
+
 ## Step 2: Pre-Trade Analysis
 
 Before stepping through bars:

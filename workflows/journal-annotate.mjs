@@ -111,7 +111,8 @@ async function chartGeometry() {
       var bar=bars.valueAt(i); if(!bar) continue;
       var x=ts.timeToCoordinate(bar[0]);
       if(!Number.isFinite(x)||x < -200||x > width+200) continue;
-      out.push({time:bar[0],x:x,highY:ps.priceToCoordinate(bar[2],first),lowY:ps.priceToCoordinate(bar[3],first)});
+      out.push({time:bar[0],x:x,highY:ps.priceToCoordinate(bar[2],first),lowY:ps.priceToCoordinate(bar[3],first),
+        openY:ps.priceToCoordinate(bar[1],first),closeY:ps.priceToCoordinate(bar[4],first)});
     }
     return {width:width,height:height,bars:out};
   })()`);
@@ -159,8 +160,16 @@ export function placeLabels(plan, geometry) {
   const visible = geometry.bars.filter(b => b.x >= 0 && b.x <= geometry.width);
   if (!visible.length) throw Error(`Trade ${plan.id}: no visible candles`);
   const gaps = visible.slice(1).map((bar, i) => Math.abs(bar.x - visible[i].x)).filter(n => n > 0).sort((a, b) => a - b);
-  const candleHalfWidth = Math.min(5, (gaps[Math.floor(gaps.length / 2)] || 10) * .3) + 3;
-  const candleBoxes = visible.map(bar => ({left:bar.x-candleHalfWidth,right:bar.x+candleHalfWidth,top:bar.highY-3,bottom:bar.lowY+3}));
+  const candleHalfWidth = Math.min(5, (gaps[Math.floor(gaps.length / 2)] || 10) * .3) + 1;
+  const anchorRadius = Math.min(6, (gaps[Math.floor(gaps.length / 2)] || 10) * .3);
+  // Wicks are thin; treating their entire high/low span as a padded body can
+  // block a leader at its starting point beside a neighboring tall wick.
+  const candleBoxes = visible.flatMap(bar => [
+    {left:bar.x-1.5,right:bar.x+1.5,top:bar.highY-2,bottom:bar.lowY+2},
+    {left:bar.x-candleHalfWidth,right:bar.x+candleHalfWidth,
+      top:Math.min(bar.openY ?? bar.highY,bar.closeY ?? bar.lowY)-1,
+      bottom:Math.max(bar.openY ?? bar.highY,bar.closeY ?? bar.lowY)+1},
+  ]);
   // Reserve all fill anchors before placing the first note, including later fills.
   const anchorClearance = plan.fills.flatMap(fill => {
     const bar = visible.find(item => item.time === fill.time);
@@ -197,8 +206,8 @@ export function placeLabels(plan, geometry) {
           // connector endpoints with a smaller radius so adjacent anchors do not
           // make every possible leader fail merely at its own starting point.
           if (anchorClearance.some(other => other.time !== fill.time && segmentIntersectsBox(leaderStart, leaderEnd, {
-            left:(other.left+other.right)/2-6,right:(other.left+other.right)/2+6,
-            top:(other.top+other.bottom)/2-6,bottom:(other.top+other.bottom)/2+6,
+            left:(other.left+other.right)/2-anchorRadius,right:(other.left+other.right)/2+anchorRadius,
+            top:(other.top+other.bottom)/2-anchorRadius,bottom:(other.top+other.bottom)/2+anchorRadius,
           }))) continue;
           const score = Math.hypot(dx, dy) + (sign === 1 ? 0 : 35);
           found.push({ ...fill, anchor:{time:fill.time,x:anchor.x,y:anchorY},
@@ -211,7 +220,8 @@ export function placeLabels(plan, geometry) {
   // Choose the entire cluster together: a greedy early note can occupy the only
   // safe lane for a later fill, even though another complete layout exists.
   for(const search of [{distances:[70,95,120,145,170],reach:190},
-    {distances:[45,70,95,120,145,170,195,220],reach:250}]) {
+    {distances:[45,70,95,120,145,170,195,220],reach:250},
+    {distances:[95,145,195,245,295,345,395,445,495],reach:400}]) {
     const options=plan.fills.map(fill=>candidates(fill,search.distances,search.reach));
     if(options.some(list=>!list.length))continue;
     const order=options.map((list,index)=>({index,count:list.length})).sort((a,b)=>a.count-b.count);

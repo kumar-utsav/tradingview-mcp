@@ -254,3 +254,16 @@ test('review draft receives geometry and IDs while keeping visual review pending
   assert.equal(review.trades[0].chart_annotations.overlap_checked,false);
   assert.equal(review.trades[0].chart_reviewed,false);
 });
+
+test('narrow spacing distinguishes a neighboring thin wick from its candle body', () => {
+  const geometry={width:700,height:500,bars:Array.from({length:140},(_,i)=>({
+    time:t(i),x:30+i*4.17,highY:120,lowY:i===21?195:160,openY:135,closeY:145,
+  }))};
+  const fill={transaction_index:0,time:t(20),side:'BUY',text:'BUY 1 @ $1.02'};
+  const [label]=placeLabels({id:1,fills:[fill]},geometry);
+  assert.ok(label);
+  for(const bar of geometry.bars){
+    assert.equal(segmentIntersectsBox(label.anchor,label.label,{left:bar.x-1,right:bar.x+1,top:bar.highY,bottom:bar.lowY}),false);
+    assert.equal(segmentIntersectsBox(label.anchor,label.label,{left:bar.x-1.25,right:bar.x+1.25,top:bar.openY,bottom:bar.closeY}),false);
+  }
+});

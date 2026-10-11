@@ -56,6 +56,49 @@ export async function start({ date, _deps } = {}) {
   return { success: true, replay_started: true, date: date || '(first available)', current_date: currentDate };
 }
 
+const PACIFIC = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
+
+function pacificWallTime(date, clock) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date)
+    throw new Error('date must be a valid YYYY-MM-DD date');
+  const desired = Date.parse(`${date}T${clock}:00Z`);
+  let candidate = desired;
+  for (let i = 0; i < 3; i++) {
+    const parts = Object.fromEntries(PACIFIC.formatToParts(new Date(candidate)).map(p => [p.type, p.value]));
+    const wall = Date.parse(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`);
+    if (wall === desired) return candidate;
+    candidate += desired - wall;
+  }
+  throw new Error(`Could not resolve ${date} ${clock} in Pacific time`);
+}
+
+/** Start replay so the requested Pacific-time minute is the final replay candle. */
+export async function startToCutoff({ date, cutoff, _deps } = {}) {
+  const clock = cutoff === 'open' ? '06:30' : cutoff === 'morning' ? '09:00' : null;
+  if (!clock) throw new Error('cutoff must be "open" (6:30 AM) or "morning" (9:00 AM)');
+  const target = pacificWallTime(date, clock);
+  const { evaluate } = _resolve(_deps);
+  const resolution = await evaluate('window.TradingViewApi._activeChartWidgetWV.value().resolution()');
+  if (String(resolution) !== '1') throw new Error(`This shortcut requires a 1-minute chart; the current chart is ${resolution}. Change the timeframe to 1 minute and try again.`);
+  // TradingView excludes the selected replay candle on some layouts; selecting
+  // the next one-minute bar makes the requested minute the inclusive endpoint.
+  const result = await start({ date: new Date(target + 60_000).toISOString(), _deps });
+  const { getReplayApi } = _resolve(_deps);
+  const rp = await getReplayApi();
+  let currentDate = null;
+  for (let i = 0; i < 20; i++) {
+    currentDate = await evaluate(wv(`${rp}.currentDate()`));
+    if (currentDate !== null && Number(currentDate) * 1000 >= target) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (currentDate === null || Number(currentDate) * 1000 < target || Number(currentDate) * 1000 >= target + 60_000)
+    throw new Error(`Replay did not land on the ${clock} Pacific cutoff for ${date}; current replay time was ${currentDate ?? 'unavailable'}`);
+  return { ...result, requested_date: date, cutoff_pacific: `${date} ${clock}`, current_date: currentDate };
+}
+
 export async function step({ _deps } = {}) {
   const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();

@@ -205,6 +205,8 @@ tv screenshot -r chart             # capture chart
 tv pine compile                    # compile Pine Script
 tv pane layout 2x2                 # 4-chart grid
 tv pane symbol 1 ES1!              # set pane symbol
+tv replay cutoff 2026-08-06 open    # replay through 6:30 AM Pacific
+tv replay cutoff 2026-08-06 morning # replay through 9:00 AM Pacific
 tv stream quote | jq '.close'      # monitor price changes
 ```
 
@@ -293,6 +295,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Switch to AAPL daily" | `chart_set_symbol` → `chart_set_timeframe` |
 | "Write a Pine Script for..." | `pine_set_source` → `pine_smart_compile` → `pine_get_errors` |
 | "Start replay at March 1st" | `replay_start` → `replay_step` → `replay_trade` |
+| "Replay this date through 6:30 or 9:00 AM Pacific" | `replay_to_session_cutoff` with a date and cutoff |
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
@@ -371,6 +374,7 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | Step |
 |------|------|
 | `replay_start` | Enter replay at a date |
+| `replay_to_session_cutoff` | Replay a date through the inclusive 6:30 AM or 9:00 AM Pacific candle |
 | `replay_step` | Advance one bar |
 | `replay_autoplay` | Auto-advance (set speed in ms) |
 | `replay_trade` | Buy/sell/close positions |
