@@ -1,5 +1,16 @@
 # Capture backtest day
 
+**New captures use structured review v1**, approved on 2026-10-16. Before
+accessing TradingView, run `node --env-file=.env workflows/capture-review.mjs preflight backtest`
+and require `ready:true`. Follow [capture-review.md](capture-review.md) for the
+conditional questions, optional exception bullets and save flow. Use
+`backtest-freeze.mjs freeze-review DATE NEW_PACK` to select v1 explicitly.
+It supersedes the prose-note handoff and legacy tagging below; chart safeguards
+remain unchanged. Existing pending packs keep their recorded version.
+
+## Legacy compatibility instructions and unchanged chart safeguards
+
+
 ## Stage 1: capture all trades, then wait for chat notes
 
 Read TradingView state once to identify the chart date, ticker and timeframe.

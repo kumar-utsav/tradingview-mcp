@@ -68,11 +68,13 @@ export async function createPack(config,outputDir) {
   }
   const notes=`# Journal notes ${date}\n\nWrite under each trade heading, or give numbered notes in chat. Write NO NOTE to explicitly skip commentary for a trade. Keep the headings/IDs. Day notes are optional.\n\n${ordered.map(t=>`## Trade ${t.number} | ID ${t.trade_id}\n\n`).join('')}## Day\n\n`;
   await fs.writeFile(path.join(packDir,'notes.md'),notes,{flag:'wx'});
-  const gallery=`# Journal capture ${date}\n\nTradingView is released. Screenshots and native RR are captured; nothing has been saved to the journal yet. Add numbered notes in chat or [notes.md](notes.md), then say continue.\n\n${ordered.map(t=>`## Trade ${t.number} | ID ${t.trade_id}\n\n${t.ticker} ${t.type} - entry ${t.entry_candle} - native RR ${review.trades.find(x=>x.id===t.trade_id).rr}\n\n![Trade ${t.number}](trade-${t.trade_id}.png)\n\n`).join('')}`;
+  const handoff=config.questionnaire_version===1?'Answer the five prompts in chat; exceptions are optional. Say finish when ready. See [review-input.json](review-input.json).':'Add numbered notes in chat or [notes.md](notes.md), then say continue.';
+  const gallery=`# Journal capture ${date}\n\nTradingView is released. Screenshots and native RR are captured; nothing has been saved to the journal yet. ${handoff}\n\n${ordered.map(t=>`## Trade ${t.number} | ID ${t.trade_id}\n\n${t.ticker} ${t.type} - entry ${t.entry_candle} - native RR ${review.trades.find(x=>x.id===t.trade_id).rr}\n\n![Trade ${t.number}](trade-${t.trade_id}.png)\n\n`).join('')}`;
   await fs.writeFile(path.join(packDir,'capture-pack.md'),gallery,{flag:'wx'});
-  const state={version:1,mode:'capture_first',phase:'awaiting_notes',date,created_at:new Date().toISOString(),tradingview_released:true,ordered,image_hashes:imageHashes,sealed_file_hashes:sealedFiles};
+  const state={version:1,...(config.questionnaire_version===1?{questionnaire_version:1}:{}),mode:'capture_first',phase:'awaiting_notes',date,created_at:new Date().toISOString(),tradingview_released:true,ordered,image_hashes:imageHashes,sealed_file_hashes:sealedFiles};
   // Written last; a partial copy is not a ready pack.
   await fs.writeFile(path.join(packDir,'stage.json'),JSON.stringify(state,null,2),{flag:'wx'});
+  if(config.questionnaire_version===1){const {prepare}=await import('./capture-review.mjs');await prepare(packDir);}
   return {pack_dir:packDir,date,phase:state.phase,tradingview_released:true,ordered};
 }
 
@@ -99,6 +101,8 @@ export async function resumePack(packDir,freshSnapshotPath,outputPath,notesPath=
   for(const file of ['before.json','captured-review.json','evidence.json','chart-release.json'])if(hash(await fs.readFile(path.join(packDir,file)))!==state.sealed_file_hashes?.[file])throw Error(`Sealed capture evidence changed: ${file}`);
   if(isoDate(fresh.date)!==state.date||!sameIDs(old.trades,fresh.trades))throw Error('Imported day/IDs changed; coordinate a new capture window');
   for(const trade of fresh.trades){
+    const original=old.trades.find(x=>x.id===trade.id);
+    if(state.questionnaire_version===1&&hash(JSON.stringify(trade.capture_review||null))!==hash(JSON.stringify(original.capture_review||null))&&trade.capture_review?.pack_id!==path.basename(packDir))throw Error(`Structured review changed during handoff; reconcile it before saving: ${trade.id}`);
     if(financialFingerprint(trade)!==financialFingerprint(old.trades.find(x=>x.id===trade.id)))throw Error(`Imported trade changed; cached chart must be recaptured: ${trade.id}`);
     if(fresh.chart_hashes[trade.id]!==old.chart_hashes[trade.id]&&fresh.chart_hashes[trade.id]!==state.image_hashes[trade.id])throw Error(`Journal chart changed during handoff: ${trade.id}`);
     const file=path.join(packDir,`trade-${trade.id}.png`);
@@ -127,7 +131,7 @@ export async function resumePack(packDir,freshSnapshotPath,outputPath,notesPath=
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const [command,a,b,c,d]=process.argv.slice(2);
   try {
-    if(command==='create'&&a&&b)console.log(JSON.stringify(await createPack(await load(a),b),null,2));
+    if((command==='create'||command==='create-review')&&a&&b){const config=await load(a);if(command==='create-review')config.questionnaire_version=1;console.log(JSON.stringify(await createPack(config,b),null,2));}
     else if(command==='resume'&&a&&b&&c)console.log(JSON.stringify(await resumePack(a,b,c,d),null,2));
     else throw Error('Usage: journal-pack.mjs create config.json NEW_PACK_DIR | resume PACK_DIR FRESH_BEFORE_JSON NEW_REVIEW_JSON [NOTES_MD_OR_JSON]');
   }catch(error){console.error(error.message);process.exitCode=1;}

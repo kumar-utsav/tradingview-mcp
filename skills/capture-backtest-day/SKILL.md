@@ -1,6 +1,6 @@
 ---
 name: capture-backtest-day
-description: Capture all TradingView backtest trades and evidence first, release the chart, then wait for numbered chat notes before assembling, saving and verifying records. Use for capture backtest day, dictation variants and continuation of a pending capture.
+description: Capture TradingView backtest trades and evidence first, release the chart, then collect conditional structured answers and optional exception bullets before saving and verifying filterable reviews. Existing pending packs retain their recorded mode. Use for capture backtest day, dictation variants and continuation of a pending capture.
 ---
 
 # Capture Backtest Day
@@ -8,7 +8,22 @@ description: Capture all TradingView backtest trades and evidence first, release
 This local skill always operates in `/Users/utsav/Projects/tradingview-mcp`, even
 when invoked elsewhere. Read and follow the complete, maintained workflow at
 [capture-backtest-day.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-backtest-day.md),
-run its helpers from that project, and keep its audit artifacts there.
+run its helpers from that project, and keep disposable audit artifacts in the OS temporary directory.
+
+## Structured capture review v1
+
+Read [the shared structured workflow](../../workflows/capture-review.md) for the
+new questionnaire, provenance, research, filters and save contract. It replaces
+the mandatory prose-note handoff **only for packs marked questionnaire_version 1**.
+Use five conditional prompts; exceptions are optional bullets. Preserve raw
+dictation locally. Existing pending packs keep their recorded version. The user approved the pilot and rollout on 2026-10-16. Version 1 is now the
+default for new captures: run the shared read-only readiness check before chart
+access; use `journal-pack.mjs create-review` for Journal and
+`backtest-freeze.mjs freeze-review` for Backtest. Follow the shared workflow
+through API, visible checklist/filter/statistic and recoverable-backup
+verification. Do not backfill history or migrate catalogs during capture.
+
+The instructions below describe the legacy mode and unchanged chart safeguards.
 
 Start with the workflow's chart-only `backtest-freeze.mjs freeze-chat` phase before
 backend snapshots or tag review. Capture the original annotated

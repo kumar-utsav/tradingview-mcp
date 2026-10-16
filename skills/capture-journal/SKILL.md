@@ -1,6 +1,6 @@
 ---
 name: capture-journal
-description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags. Capture screenshots/RR/evidence first and release TradingView, then process user notes and save from the local pack without chart access; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
+description: Capture imported journal trades with chart annotations, screenshots, RR, evidence-based tags. Capture screenshots/RR/evidence first and release TradingView, then collect structured answers and optional exception bullets and save from the local pack without chart access; use batch replay without manual notes when explicitly requested across dates. Use for capture journal, capture journal day, batch journal capture, or continuation of a pending capture.
 ---
 
 # Capture Journal
@@ -12,6 +12,21 @@ run its helpers from that project. Keep disposable work in the OS temporary
 directory, outside the checkout. Pending capture packs are durable user artifacts
 under `/Users/utsav/Desktop/Journal Captures/`, so chat compaction, a later
 continuation or a changed chart cannot lose the screenshots/evidence.
+
+## Structured capture review v1
+
+Read [the shared structured workflow](../../workflows/capture-review.md) for the
+new questionnaire, provenance, research, filters and save contract. It replaces
+the mandatory prose-note handoff **only for packs marked questionnaire_version 1**.
+Use five conditional prompts; exceptions are optional bullets. Preserve raw
+dictation locally. Existing pending packs keep their recorded version. The user approved the pilot and rollout on 2026-10-16. Version 1 is now the
+default for new captures: run the shared read-only readiness check before chart
+access; use `journal-pack.mjs create-review` for Journal and
+`backtest-freeze.mjs freeze-review` for Backtest. Follow the shared workflow
+through API, visible checklist/filter/statistic and recoverable-backup
+verification. Do not backfill history or migrate catalogs during capture.
+
+The instructions below describe the legacy mode and unchanged chart safeguards.
 
 ## Capture first, then finish without TradingView
 

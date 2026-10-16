@@ -1,0 +1,78 @@
+# Structured journal and backtest capture, version 1
+
+This reference is shared by both skills. The executable question registry and research policy live in `/Users/utsav/Projects/trading/frontend/src/utils/captureReview.js`; do not maintain separate question lists. It exports 30 conditional topics, five prompts, fields, answer states, generated tag definitions, calculations and the query contract.
+
+## Rollout and compatibility
+
+The user approved the read-only pilot and rollout on 2026-10-16. Version 1 is enabled for future captures in both workflows. Existing packs use their recorded mode; never convert them silently or backfill history. For new Journal packs use `journal-pack.mjs create-review CONFIG NEW_PACK`; for new Backtest packs use `backtest-freeze.mjs freeze-review DATE NEW_PACK`. Batch captures may mark unsupported user decisions unknown instead of requesting dictation when the user explicitly waives questions. Catalog installation and deployment remain separate from routine capture.
+
+For an explicitly selected v1 pack, check readiness **before any chart access**:
+
+```sh
+node --env-file=.env workflows/capture-review.mjs preflight journal
+# Use preflight backtest for that workflow.
+```
+
+Require `ready:true`. The check is read-only and verifies the reviewed schema and complete versioned catalog. Missing dependencies leave TradingView free and do not authorize a deployment, catalog recreation or a silent legacy fallback. `journal-pack.mjs create-review CONFIG NEW_PACK` is an explicit v1 convenience command; `create` keeps its compatibility behavior. Use version 1 for new captures. Compatibility commands and existing pending packs retain their legacy behavior.
+
+
+## 1. Secure evidence and release the chart
+
+Keep the existing annotation, view, zoom, screenshot isolation, native-tool RR, identity and restoration checks. The journal MFE tool geometry is unchanged. Its displayed RR remains in Details; it is not realized journal R or the research target.
+
+Cache the available candles once per underlying/session, including timestamps, timeframe, tick size, source identity, zone/drawing geometry, indicator evidence and explicit coverage boundaries/gaps. Include `session:{open,close}` in Unix seconds, with the dated exchange-session source; normal SPY hours are an unverified fallback that cannot produce research results. Confirm dated regular-session boundaries from an authoritative calendar/cached evidence, or record an explicitly approved, sourced `references.session:{open,close,approved:true,source}` after release. Without confirmed boundaries the comparison is unavailable; the actual trade still saves. Keep full raw evidence. Candidate retest candles and protective swings can be proposed from these cached bars; record their timestamps, extremes and confirmation/availability times. Static drawings do not establish historical availability. Missing activation evidence remains unavailable.
+
+Read only candles already available. Never advance replay, wait for future candles or change approved geometry/zoom to fill a 30-minute window. Save the actual trade even if research is incomplete. Review each screenshot visually, restore and verify chart state, then release TradingView. Stage one makes no app writes.
+
+Journal: add `questionnaire_version:1` to the normal `journal-pack.mjs create` config. Backtest:
+
+```sh
+node workflows/backtest-freeze.mjs freeze-review YYYY-MM-DD /absolute/new/pack
+```
+
+The pack includes `review-input.json` with immutable trade numbers/source IDs, five prompts and missing answer envelopes. Raw evidence and screenshots stay sealed. Tell the user TradingView is free. Show the trade mapping and ask only the relevant prompts.
+
+## 2. Collect answers without accessing TradingView
+
+Use five conversational prompts from the registry: entry, risk, management, emotions and exceptions. Extract supplied ordinary dictation; do not ask it twice. Confluences/obstacles belong with entry; missing exact references needed for a comparison get a conditional follow-up. Do not ask all 30 questions per trade.
+
+Each answer is `known`, `missing`, `skipped`, `not_applicable` or `conflicting`, with `source: observed|reported|derived`. Observed facts need evidence references. Missing/skipped/conflicting states need a reason. Never infer emotions, intention, seconds-level timing, chart activation or absence from silence. Preserve disagreements, including recorded outcomes versus reported results, and exclude affected comparisons until resolved. An empty Notes editor is valid.
+
+Keep original dictation in `raw_dictation` in the input. Use at most three short exception bullets per trade (300 characters each); preserve existing notes. Store prices, times, quantities and distances as measurements, not tag text. Store each obstacle and its behavior together under one linked ID. Management events include planned targets/partial quantities and actual decisions as separate rows with provenance.
+
+Partial answers stay resumable in `review-input.json`; do not assemble until coverage is complete or explicitly skipped/unknown and the user instructs finishing. A complete answer set plus “finish/continue” authorizes saving without another routine confirmation. Set `user_finished:true` only for that instruction.
+
+```sh
+node workflows/capture-review.mjs assemble /absolute/pack /absolute/pack/review-input.json
+node --env-file=.env workflows/capture-review.mjs publish /absolute/pack
+```
+
+Use the normal repository ingestion environment for publishing; do not print credentials. Assembly preserves the exact source input and seals structured answers/evidence. Publish uses fresh app baselines, native RR/screenshots, immutable source IDs, and stable request IDs. It never reads or mutates TradingView after release. Failed attempts retain recovery, progress and exact request payloads; retry the same pack without rebasing onto concurrent edits. Backup export includes all distinct evidence payloads referenced by current and historical revisions. Changed fills, charts or evidence require coordination, never an automatic recapture.
+
+## 3. Shared storage and tags
+
+The backend routes are identical for journal/backtest: GET `/:page/:id/capture-review`, PUT the same route, GET `/:page/capture-review/registry`, POST `/:page/capture-review/query` with explicit selected `trade_ids` and `filter`. PUT requires `expected_revision`, `trade_fingerprint`, `evidence_fingerprint` (null for a new review), stable `request_id`, `document`, and optionally cached `evidence`.
+
+The backend recomputes research, hashes shared session evidence, atomically saves review/revision plus generated `capture_v1__…` tags and owned rich-text exception bullets. Legacy tags/notes remain intact. A stale update returns 409. Do not work around catalog errors with generic tag writes. Definitions are installed only by the explicit additive catalog installer after the database migration; do not restore the CSV's old catalog.
+
+The shared Checklist component owns new selections. Generic checkbox/tag writes cannot change projected tags. App lists, declarative filters, reports and MCP use the shared matcher/statistics. Included tags default ALL; exclude ANY. Old MCP callers retain their historical semantics. Linked obstacle/scenario conditions must match the same row. Missing is not No. Each trade counts once. Stale/conflicting evidence is excluded from affected research; counts remain visible.
+
+## 4. Research policy
+
+Freeze the approved original retest candle, confirmed protective swing, extra barrier and next opposing zone before the original eligible trigger. Require exact candle timestamp/high/low and completed-candle availability. The objective is the next zone's near edge. Compare original one-tick break and first subsequent extra-barrier one-tick break against fixed $0.50, original retest extreme plus one tick, and already-confirmed structure extreme plus one tick. Fixed stops follow each scenario's entry; all structural references and target remain frozen.
+
+All six scenarios share 30 minutes from the original trigger, censored at RTH close, and equal cash risk. Use each risk distance for normalized underlying R. Never infer option dollars/returns. Opening gaps fill at available open for entry/stops and conservatively at target for target fills. Pre-entry stop touches do not stop a scenario. OHLC entry/stop/target ordering ambiguity remains unresolved. Missing references/geometry/gaps are unavailable or incomplete, never false losses/wins. Record later post-stop target reach separately. SPY near-stop threshold starts at $0.05, adjustable in the versioned policy. Pairs require comparable resolved results and report exclusions.
+
+Label results research within captured setups. Skipped opportunities are outside this dataset. Keep journal P/L, legacy modeled outcomes, research R and native chart RR distinct. Realized journal R requires documented initial cash risk.
+
+## 5. Completion and recovery
+
+Publish returns `api_verified_ui_pending`. Verify the existing Checklist tab visibly shows saved selections and tags, filters return the same IDs/statistics as the API/MCP contract, and CSV export/import preserves review/evidence/revisions in an isolated database. Do not restore a backup into live history as verification.
+
+Record `{date,tradingview_used:false,backup_verified:true,filter_statistics_verified:true,trades:[{trade_id,revision,checklist_verified:true,tags_verified:true,evidence:"saved screenshot or inspection reference"}]}` as proof, then:
+
+```sh
+node workflows/capture-review.mjs verify-visible /absolute/pack /absolute/proof.json
+```
+
+This is a verification receipt, not an automatic UI test. Do not claim visual verification from the receipt alone. Preserve completed packs and useful tests; remove only task-owned temporary audits/servers after verification. Deployment and historical rewriting remain separate actions.

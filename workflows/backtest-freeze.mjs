@@ -13,12 +13,12 @@ async function durableWrite(file, value) {
   finally { await handle.close(); }
 }
 
-export async function freezeDay(date, directory, {capture=freezeBacktestDay,notesMode='chart'}={}) {
+export async function freezeDay(date, directory, {capture=freezeBacktestDay,notesMode='chart',questionnaireVersion}={}) {
   date=isoDate(date);
   directory=path.resolve(directory);
   await fs.mkdir(path.dirname(directory),{recursive:true});
   await fs.mkdir(directory); // Never reuse/overwrite another run.
-  const bundle=await capture({date,notesMode,persist:async (phase,data)=>{
+  const bundle=await capture({date,notesMode,questionnaireVersion,persist:async (phase,data)=>{
     await durableWrite(path.join(directory,phase+'.json'),JSON.stringify(data,null,2));
     if(phase==='recovery')await durableWrite(path.join(directory,'annotated-start.png'),Buffer.from(data.annotated_screenshot.base64,'base64'));
     if(phase==='frozen'){
@@ -33,7 +33,7 @@ export async function freezeDay(date, directory, {capture=freezeBacktestDay,note
     }
   }});
   const frozen=await fs.readFile(path.join(directory,'frozen.json'),'utf8');
-  const ready={date,notes_mode:notesMode,chart_released:true,ingestion_complete:false,
+  const ready={date,...(questionnaireVersion===1?{questionnaire_version:1}:{}),notes_mode:notesMode,chart_released:true,ingestion_complete:false,
     trade_count:bundle.payload.trades.length,idempotency_key:bundle.idempotency_key,
     frozen_sha256:digest(frozen),released_at:new Date().toISOString()};
   if(notesMode==='chat')await durableWrite(path.join(directory,'pending-notes.json'),JSON.stringify({
@@ -43,8 +43,9 @@ export async function freezeDay(date, directory, {capture=freezeBacktestDay,note
       screenshot:`position-${i+1}.png`}))
   },null,2));
   await durableWrite(path.join(directory,'chart-ready.json'),JSON.stringify(ready,null,2));
+  if(questionnaireVersion===1){const {prepare}=await import('./capture-review.mjs');await prepare(directory);}
   return {...ready,directory,message:notesMode==='chat'
-    ? 'TradingView is free to use. Send numbered trade notes in chat; nothing has been saved to the server.'
+    ? (questionnaireVersion===1?'TradingView is free to use. Answer the five capture prompts in chat; notes are optional. Nothing has been saved to the server.':'TradingView is free to use. Send numbered trade notes in chat; nothing has been saved to the server.')
     : 'Chart evidence secured. You can move on in TradingView now; saving and review continue from this bundle.'};
 }
 
@@ -113,11 +114,11 @@ export async function publishDay(directory,{publish=publishFrozenBacktestDay}={}
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const [command,dateOrDirectory,directory]=process.argv.slice(2);
   try {
-    const result=command==='freeze' || command==='freeze-chat'
-      ? await freezeDay(dateOrDirectory,directory,{notesMode:command==='freeze-chat'?'chat':'chart'})
+    const result=command==='freeze' || command==='freeze-chat' || command==='freeze-review'
+      ? await freezeDay(dateOrDirectory,directory,{notesMode:command==='freeze'?'chart':'chat',questionnaireVersion:command==='freeze-review'?1:undefined})
       : command==='assemble' ? await assembleNotes(dateOrDirectory,directory)
       : command==='publish' ? await publishDay(dateOrDirectory)
-      : (()=>{throw Error('Usage: backtest-freeze.mjs freeze-chat|freeze YYYY-MM-DD NEW_DIRECTORY | assemble DIRECTORY NOTES_JSON | publish DIRECTORY');})();
+      : (()=>{throw Error('Usage: backtest-freeze.mjs freeze-review|freeze-chat|freeze YYYY-MM-DD NEW_DIRECTORY | assemble DIRECTORY NOTES_JSON | publish DIRECTORY');})();
     console.log(JSON.stringify(result,null,2));
   } finally {await disconnect();}
 }

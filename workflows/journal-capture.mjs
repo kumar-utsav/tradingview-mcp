@@ -219,7 +219,7 @@ export function validateReview(review,trade,tags,groups,date) {
   if('notes_append' in review && (typeof review.notes_append!=='string'||!review.notes_append.trim()||!review.notes_source?.trim()))throw Error('New note needs source');
   if('notes' in review)throw Error('Use notes_append to preserve existing notes');
 }
-export async function applyReview(manifest,snapshot,{base,request=fetch,apply=false,readFile=fs.readFile}={}) {
+export async function applyReview(manifest,snapshot,{base,request=fetch,apply=false,readFile=fs.readFile,preserveLegacyTags=false}={}) {
   const api=client(base,request); const date=isoDate(snapshot.date);
   const rows=manifest.trades||[], skipped=manifest.skipped||[];
   const ids=[...rows,...skipped].map(t=>t.id);
@@ -243,7 +243,10 @@ export async function applyReview(manifest,snapshot,{base,request=fetch,apply=fa
   for(const row of rows){
     const old=snapshot.trades.find(t=>t.id===row.id),live=current.find(t=>t.id===row.id);
     if(!live||fingerprint(old)!==fingerprint(live))throw Error(`Stale trade ${row.id}`);
-    validateReview(row,old,tags,groups,date);
+    if(preserveLegacyTags){
+      if(!sameTags(row.tags,old.tags||[]))throw Error('Structured capture must preserve legacy tags exactly');
+      validateReview({...row,tags:[]},{...old,tags:[]},[],[],date);
+    }else validateReview(row,old,tags,groups,date);
     const oldHash=liveChartHashes.get(old.id);
     if(oldHash!==snapshot.chart_hashes[old.id])throw Error(`Chart changed since snapshot ${old.id}`);
     let image=null;

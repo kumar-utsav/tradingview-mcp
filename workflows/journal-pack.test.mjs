@@ -90,3 +90,5 @@ test('rejects cached evidence that uses post-exit extrema or the wrong PD date',
   f.evidence.sources[0].ranges.pd={status:'complete',source:'fixture',date,from:start-600,to:start-300,low:98,high:100,bar_count:5};await write(f.config.evidence_path,f.evidence);
   await assert.rejects(createPack(f.config,f.pack),/Wrong cached range date/);
 });
+
+test('structured review metadata does not invalidate an otherwise unchanged captured journal trade',async t=>{const f=await fixture(t);f.config.questionnaire_version=1;await createPack(f.config,f.pack);const fresh=structuredClone(f.snapshot);fresh.trades[0].capture_review={version:1,revision:1,pack_id:path.basename(f.pack)};const file=path.join(f.dir,'fresh.json'),notes=path.join(f.dir,'notes.json');await write(file,fresh);await write(notes,{date,trades:[{number:1,trade_id:2938,text:'',no_note:true}]});await resumePack(f.pack,file,path.join(f.dir,'resumed.json'),notes);fresh.trades[0].capture_review.pack_id='manual-edit';await write(file,fresh);await assert.rejects(resumePack(f.pack,file,path.join(f.dir,'other.json'),notes),/Structured review changed/);});

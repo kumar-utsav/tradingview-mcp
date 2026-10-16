@@ -154,11 +154,11 @@ describe('Frozen backtest capture',()=>{
   it('snapshots actual notes, geometry and loaded history, without including future dates',()=>{
     const items=[['2026-09-01T14:00:00Z',1],['2026-09-02T14:00:00Z',2],['2026-09-03T14:00:00Z',3]]
       .map(([d,p])=>({value:[Date.parse(d)/1000,p,p+1,p-1,p,5]}));
-    const chart={symbolExt:()=>({symbol:'SPY'}),resolution:()=>1,getVisibleRange:()=>({from:1,to:2}),
+    const chart={_chartWidget:{model:()=>({mainSeries:()=>({symbolInfo:()=>({minmov:1,pricescale:100})})})},symbolExt:()=>({symbol:'SPY'}),resolution:()=>1,getVisibleRange:()=>({from:1,to:2}),
       getAllShapes:()=>[{id:'n1',name:'text'}],getShapeById:()=>({getPoints:()=>[{time:1,price:2}],getProperties:()=>({text:'1: Original'})}),
       getAllStudies:()=>[{id:'s1',name:'Levels'}],getSeries:()=>({data:()=>({bars:()=>({_items:items})})})};
     const r=vm.runInNewContext(frozenChartEvidenceExpression('2026-09-02'),{window:{TradingViewApi:{activeChart:()=>chart},location:{pathname:'/chart/test/'}}});
-    assert.equal(r.bars.length,2);assert.equal(r.drawings[0].properties.text,'1: Original');
+    assert.equal(r.instrument.tick_size,0.01);assert.equal(r.bars.length,2);assert.equal(r.drawings[0].properties.text,'1: Original');
     assert.equal(r.previous_loaded_date,'2026-09-01');assert.equal(r.identity.last_bar[1],2);
     chart.getShapeById=()=>assert.fail('Commentary must not be read in chat mode');
     const chat=vm.runInNewContext(frozenChartEvidenceExpression('2026-09-02',false,false),{window:{TradingViewApi:{activeChart:()=>chart},location:{pathname:'/chart/test/'}}});

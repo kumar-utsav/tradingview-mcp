@@ -360,6 +360,7 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
     Object.assign(a,{
       position_entity_id:result.position_entity_id,
       position_rr:result.position_rr,
+      position_tick_size:result.position_tick_size,
       position_start_candle_time:result.position_start_candle_time,
       position_end_candle_time:result.position_end_candle_time,
       position_mfe_candle_time:result.position_mfe_candle_time,

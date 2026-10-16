@@ -1644,7 +1644,8 @@ export function frozenChartEvidenceExpression(date, identityOnly = false, includ
       .filter(function(d) {return d < target;}).sort();
     var previous = dates.length ? dates[dates.length-1] : null;
     var selected = dated.filter(function(x) {return x.date===target || x.date===previous;});
-    return {identity:identity, chart_date:target, previous_loaded_date:previous,
+    var info=null;try {info=chart._chartWidget.model().mainSeries().symbolInfo();} catch (_) {}
+    return {identity:identity,instrument:{tick_size:info&&info.minmov/info.pricescale}, chart_date:target, previous_loaded_date:previous,
       drawings:shapes, bars:selected.slice(-5000).map(function(x) {return x.value.slice(0,6);}),
       bars_truncated:selected.length>5000,
       history_note:'Loaded bars only; missing history remains unknown, not a complete session claim.',
@@ -1653,7 +1654,7 @@ export function frozenChartEvidenceExpression(date, identityOnly = false, includ
 }
 
 /** Short chart-only phase. persist must durably save recovery before note removal. */
-export async function freezeBacktestDay({ date, persist, notesMode = 'chart', _deps } = {}) {
+export async function freezeBacktestDay({ date, persist, notesMode = 'chart', questionnaireVersion, _deps } = {}) {
   if (!['chart','chat'].includes(notesMode)) throw new Error('Unknown notes mode');
   const readChartNotes = notesMode === 'chart';
   if (typeof persist !== 'function') throw new Error('A durable evidence writer is required');
@@ -1684,7 +1685,7 @@ export async function freezeBacktestDay({ date, persist, notesMode = 'chart', _d
   const bundle = {version:1, notes_mode:notesMode, idempotency_key:randomUUID(), frozen_at:new Date().toISOString(),
     evidence:{...evidence,graphics}, annotated_screenshot:annotated,
     note_audit:day.extraction?.note_audit || [],
-    payload:{capture_date:date,positions_found:day.inventory.length,trades:day.trades,
+    payload:{...(questionnaireVersion===1?{capture_review_version:1}:{}),capture_date:date,positions_found:day.inventory.length,trades:day.trades,
       skipped:day.skipped,daily_note:day.dailyNotes?.note || null,daily_resources:[],
       daily_note_drawings:day.dailyNotes?.count || 0,
       trade_notes_found:day.extraction?.note_audit?.length || 0,

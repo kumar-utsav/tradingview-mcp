@@ -177,3 +177,14 @@ files while work is incomplete or a saved result remains unverified.
 Review changes individually during cleanup; never reset the checkout or discard
 useful work merely to make Git status clean. Cleanup does not authorize a
 commit, push, or deployment.
+
+## Structured capture review v1
+
+New captures default to `questionnaire_version: 1` following user pilot and
+rollout approval on 2026-10-16. Run the read-only readiness check before chart
+access; use `journal-pack.mjs create-review` or `backtest-freeze.mjs freeze-review`. Follow
+`workflows/capture-review.md` for both personal capture workflows. Its conditional
+questions and optional exception bullets supersede mandatory prose notes for
+that version only. Existing pending packs retain their original mode. The version-1 instructions supersede legacy mandatory-note rules for new packs. Do not deploy, migrate live catalogs or
+backfill history as part of capture. Shared structured fields own their generated
+tags; preserve capture-first and zero chart access after release.

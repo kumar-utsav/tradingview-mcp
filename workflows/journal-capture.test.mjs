@@ -148,3 +148,10 @@ test('template preserves malformed imported rows for explicit skipping',()=>{
  const template=reviewTemplate({date:'2026-09-23',trades:[malformed],groups},'/tmp/run');
  assert.equal(template.trades[0].chart_annotations.transaction_markers[0].text,'');
 });
+
+test('structured actual-trade save preserves uncatalogued legacy tags without interpreting them',async()=>{
+ const m=mock();m.state.tags=['deleted-legacy-key'];const before=snapshot();before.trades[0].tags=[...m.state.tags];const r=row();r.tags=[...m.state.tags];r.group_review={};r.evidence={};
+ const request=async(url,o)=>new URL(url).pathname.startsWith('/tags')?{ok:true,json:async()=>[]}:m.request(url,o);
+ const result=await applyReview({trades:[r]},before,{...opts(m),request,apply:true,preserveLegacyTags:true});assert.equal(result.complete,true);assert.deepEqual(m.state.tags,['deleted-legacy-key']);assert(m.writes.every(w=>w.propName!=='tags'));
+ const changed=row();changed.tags=[];await assert.rejects(applyReview({trades:[changed]},before,{...opts(m),request,preserveLegacyTags:true}),/Stale|preserve legacy tags/);
+});
