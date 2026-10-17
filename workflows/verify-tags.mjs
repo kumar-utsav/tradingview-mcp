@@ -40,9 +40,10 @@ export async function snapshotDay(date,dir,{base,request=fetch,imageConcurrency=
     const ready=JSON.parse(await fs.readFile(path.join(dir,'chart-ready.json'),'utf8'));
     const frozenText=await fs.readFile(path.join(dir,'frozen.json'),'utf8');
     const frozen=JSON.parse(frozenText);
-    if(ready.chart_released!==true||ready.date!==isoDate(date)||frozen.payload?.capture_date!==isoDate(date)
-      ||ready.frozen_sha256!==createHash('sha256').update(frozenText).digest('hex')
-      ||ready.idempotency_key!==frozen.idempotency_key)throw Error('Directory is not a matching released capture');
+    const replay=ready.capture_kind==='replay_fills';
+    if(ready.chart_released!==true||ready.date!==isoDate(date)||(replay?frozen.ledger?.date:frozen.payload?.capture_date)!==isoDate(date)
+      ||(replay?ready.sealed_file_hashes?.['frozen.json']:ready.frozen_sha256)!==createHash('sha256').update(frozenText).digest('hex')
+      ||(!replay&&ready.idempotency_key!==frozen.idempotency_key))throw Error('Directory is not a matching released capture');
     try {await fs.access(path.join(dir,'before.json'));throw Error('Before snapshot already exists');}
     catch(error){if(error.code!=='ENOENT')throw error;}
   }

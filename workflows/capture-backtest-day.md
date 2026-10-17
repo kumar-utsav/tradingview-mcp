@@ -1,5 +1,10 @@
 # Capture backtest day
 
+User update, 2026-10-17: omit the emotions prompt in backtest reviews and mark
+those answers skipped. Regular journal reviews retain the emotions prompt.
+The four backtest prompts are entry, risk, management and exceptions; this
+supersedes five-prompt references below for backtest only.
+
 **New captures use structured review v1**, approved on 2026-10-16. Before
 accessing TradingView, run `node --env-file=.env workflows/capture-review.mjs preflight backtest`
 and require `ready:true`. Follow [capture-review.md](capture-review.md) for the
@@ -7,6 +12,90 @@ conditional questions, optional exception bullets and save flow. Use
 `backtest-freeze.mjs freeze-review DATE NEW_PACK` to select v1 explicitly.
 It supersedes the prose-note handoff and legacy tagging below; chart safeguards
 remain unchanged. Existing pending packs keep their recorded version.
+
+## Futures Replay Trading: fills and grouped trades
+
+When the chart is futures and the user executed Replay Trading orders, use
+`freeze-review` (automatically routes futures) or explicitly:
+
+```sh
+node --env-file=.env workflows/backtest-freeze.mjs freeze-replay-review YYYY-MM-DD NEW_PACK
+```
+
+This starts with a **local capture phase**. It reads the active chart's
+`_replayApi.replayStrategyFacade().reportData()` and `filledOrders`, not
+`replay_status.position`/`realized_pnl` (which can be null despite a populated
+Replay Trading report), broker orders, or Strategy Tester results. Replay must
+be paused. Never advance, stop, restart, clear or trade to obtain data.
+
+Capture three separate layers:
+
+1. One review trade per flat-to-flat position episode, with signed position
+   after each fill; additions and partial exits stay inside that trade. Reversals
+   split closing/opening quantities while retaining the original order ID.
+2. Every unique filled order with source ID, timestamp, sequence, side, size,
+   price, type and comment. Same-time fills retain replay sequence, not UI sort.
+3. Every matched entry/exit lot and its recorded P/L/commission, independently
+   reconciled to FIFO fills, symbol point value, position and report totals.
+
+Group the complete available report before selecting the Pacific entry date.
+Preserve other-date coverage, open positions and report truncation as limits;
+do not infer a flat start at midnight. This implementation completes captures
+only for closed positions, same account/symbol currency and fully reconcilable
+FIFO reports. Unsupported reports retain recovery and fail without success.
+
+The helper secures `replay-raw.json`, the original full screenshot,
+`recovery.json`, loaded chart evidence and per-study Pine graphics. It maps each
+trade to one unique position drawing by direction and time overlap, records
+that mapping as derived evidence, and uses the existing screenshot isolation
+and restoration checks. Drawings need to span the first actual fill; ambiguous,
+missing or reused drawings fail rather than fabricate a match. The complete
+entry-to-exit interval must already be visible. After viewing all isolated
+images, record a local visual-review receipt and release TradingView. From that
+point continue exclusively from the pack.
+
+`ledger.json`, `report.md` and `frozen.json` preserve actual fills, weighted
+prices, contracts entered, peak size, matched lots and gross/net replay P/L.
+The checksum-bound ready marker seals evidence and screenshots. One campaign
+counts once in win/loss statistics, regardless of matched-row count. Native
+planned RR and drawing geometry remain separate: position-tool distances use
+the symbol tick size, not a universal `/100`. Current geometry cannot prove
+initial stops, stop changes, intended targets or initial cash risk. Realized R
+stays null without documented initial cash risk. Do not infer emotions or
+management intention from order comments. Zero recorded commission is the
+replay configuration, not proof of realistic trading costs.
+
+Collect the same five shared prompts in the saved `review-input.json`; preserve
+dictation and supplied intent. Local `capture-review.mjs assemble` works with
+this sealed pack after the user finishes. The SPY fixed-stop research comparison
+is unavailable for futures until a validated instrument policy exists.
+
+**Publish only after backend capability verification.** The registry must report
+`ready:true` and `capabilities.replay_fills:true` after migration
+`019_replay_backtest_executions.sql` is installed. Run the normal structured
+`assemble` and `publish` commands; the publisher takes the app recovery snapshot,
+sends the sealed source report and isolated screenshots to
+`/ingestion/backtest/replay`, verifies actual fills/lots/P&L by source ID, then
+saves and independently reads back the structured reviews. It uses the original
+idempotency key and persists exact retry requests. Retries return unchanged
+records; changed execution facts require an explicit correction instead of
+overwriting history. No chart access occurs after release.
+
+The backend independently derives flat-to-flat episodes from the source report,
+stores immutable `replay_execution` JSON with instrument metadata, fills, matched
+lots and raw source orders, and keeps planned stop/target/RR unset. App records
+use Long/Short direction. The Transactions tab shows actual exposure changes and
+expandable matched lots. Dedicated replay P/L, fill-count and peak-size filters
+never apply option multipliers or invent facts for legacy drawings. CSV backup
+includes the JSON, review evidence and revisions. Verify the visible Checklist,
+Transactions tab, filter/statistics and isolated backup round trip before
+marking a deployed capture complete.
+
+If capability verification fails, report “local evidence secured; app save
+pending deployment,” never “saved/complete.” Legacy ingestion rejects replay
+packs. Do not turn fills into journal broker records, Call/Put records, prose
+notes or unrelated tags. Deployment and live database migration are separate
+from capture; never improvise them during a routine capture.
 
 ## Legacy compatibility instructions and unchanged chart safeguards
 

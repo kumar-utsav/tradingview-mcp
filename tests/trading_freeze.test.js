@@ -33,6 +33,16 @@ function fixture() {
 }
 
 describe('Frozen backtest capture',()=>{
+  it('refuses drawing-based futures modeling before note cleanup or extraction',async()=>{
+    const f=fixture(),read=f.deps.evaluate;
+    f.deps.evaluate=async expression=>{
+      const result=await read(expression);
+      return expression.includes('backtest-frozen-evidence')&&!expression.includes('if (true)')
+        ? {...result,instrument:{type:'futures',tick_size:.25,point_value:5}} : result;
+    };
+    await assert.rejects(freezeBacktestDay({date:'2026-09-02',notesMode:'chat',persist:f.persist,_deps:f.deps}),/freeze-replay-review/);
+    assert.ok(!f.events.includes('delete'));assert.ok(!f.events.includes('isolate-begin'));assert.equal(f.snapshots.frozen,undefined);
+  });
   it('chat mode never extracts or cleans chart commentary and makes no server writes',async()=>{
     const f=fixture(),evaluate=f.deps.evaluate;
     f.deps.evaluate=async expression=>{

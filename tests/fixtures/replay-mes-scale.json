@@ -1,0 +1,548 @@
+{
+  "source": "/chart/replay-fixture/",
+  "symbol": "CME_MINI:MES1!",
+  "resolution": "1",
+  "replay_time": 1788276059,
+  "instrument": {
+    "type": "futures",
+    "tick_size": 0.25,
+    "point_value": 5,
+    "currency": "USD",
+    "timezone": "America/Chicago",
+    "session": "1700-1600"
+  },
+  "report": {
+    "activeOrders": [],
+    "position": {
+      "openPL": 0,
+      "openPLPercent": null,
+      "qty": 0,
+      "price": null,
+      "symbolToAccountRate": 1
+    },
+    "ordersBrackets": [],
+    "currency": "USD",
+    "settings": {
+      "dateRange": {
+        "backtest": {
+          "from": 1786917600000,
+          "to": 1788276000000
+        },
+        "trade": {
+          "from": 1788271800000,
+          "to": 1788276000000
+        }
+      }
+    },
+    "filledOrders": [
+      {
+        "b": true,
+        "c": "Buy stop order",
+        "e": null,
+        "id": "fill-1",
+        "p": 7725,
+        "q": 5,
+        "tm": 0,
+        "tp": "STOP",
+        "utm": 1788271800000
+      },
+      {
+        "b": false,
+        "c": "Sell limit order",
+        "e": null,
+        "id": "fill-2",
+        "p": 7731,
+        "q": 3,
+        "tm": 1,
+        "tp": "LIMIT",
+        "utm": 1788272460000
+      },
+      {
+        "b": true,
+        "c": "Buy stop order",
+        "e": null,
+        "id": "fill-3",
+        "p": 7734.25,
+        "q": 3,
+        "tm": 2,
+        "tp": "STOP",
+        "utm": 1788272700000
+      },
+      {
+        "b": false,
+        "c": "Sell limit order",
+        "e": null,
+        "id": "fill-4",
+        "p": 7736,
+        "q": 3,
+        "tm": 3,
+        "tp": "LIMIT",
+        "utm": 1788273000000
+      },
+      {
+        "b": true,
+        "c": "Buy stop order",
+        "e": null,
+        "id": "fill-5",
+        "p": 7740,
+        "q": 2,
+        "tm": 4,
+        "tp": "STOP",
+        "utm": 1788273480000
+      },
+      {
+        "b": false,
+        "c": "Bracket Stop Loss",
+        "e": false,
+        "id": "fill-6",
+        "p": 7735.5,
+        "q": 4,
+        "tm": 5,
+        "tp": "STOP",
+        "utm": 1788273720000
+      },
+      {
+        "b": false,
+        "c": "Sell stop order",
+        "e": null,
+        "id": "fill-7",
+        "p": 7730.25,
+        "q": 5,
+        "tm": 6,
+        "tp": "STOP",
+        "utm": 1788274560000
+      },
+      {
+        "b": true,
+        "c": "Buy limit order",
+        "e": null,
+        "id": "fill-8",
+        "p": 7725.5,
+        "q": 3,
+        "tm": 7,
+        "tp": "LIMIT",
+        "utm": 1788275040000
+      },
+      {
+        "b": true,
+        "c": "Buy limit order",
+        "e": null,
+        "id": "fill-9",
+        "p": 7723.25,
+        "q": 1,
+        "tm": 8,
+        "tp": "LIMIT",
+        "utm": 1788275220000
+      },
+      {
+        "b": true,
+        "c": "Bracket Stop Loss",
+        "e": false,
+        "id": "fill-10",
+        "p": 7727.25,
+        "q": 1,
+        "tm": 9,
+        "tp": "STOP",
+        "utm": 1788275880000
+      }
+    ],
+    "performance": {
+      "all": {
+        "avgBarsInLossTrade": 5,
+        "avgBarsInTrade": 13.25,
+        "avgBarsInWinTrade": 14.428571428571429,
+        "avgLosTrade": 45,
+        "avgLosTradePercent": 0.0005813953488372093,
+        "avgTrade": 37.1875,
+        "avgTradePercent": 0.0004894031639093578,
+        "avgWinTrade": 48.92857143,
+        "avgWinTradePercent": 0.0006423743800160102,
+        "commissionPaid": 0,
+        "grossLoss": 45,
+        "grossLossPercent": 0.000045,
+        "grossLossWC": 45,
+        "grossProfit": 342.5,
+        "grossProfitPercent": 0.0003425,
+        "grossProfitWC": 342.5,
+        "largestLosTrade": 45,
+        "largestLosTradePercent": 0.000581395349,
+        "largestWinTrade": 110,
+        "largestWinTradePercent": 0.00142394822,
+        "marginCalls": 0,
+        "maxContractsHeld": 5,
+        "netProfit": 297.5,
+        "netProfitPercent": 0.0002975,
+        "numberOfLosingTrades": 1,
+        "numberOfWiningTrades": 7,
+        "percentProfitable": 0.875,
+        "profitFactor": 7.611111111111111,
+        "ratioAvgWinAvgLoss": 1.0873015873333334,
+        "totalOpenTrades": 0,
+        "totalTrades": 8
+      },
+      "long": {
+        "avgBarsInLossTrade": 5,
+        "avgBarsInTrade": 12.4,
+        "avgBarsInWinTrade": 14.25,
+        "avgLosTrade": 45,
+        "avgLosTradePercent": 0.0005813953488372093,
+        "avgTrade": 35.25,
+        "avgTradePercent": 0.0004014273914163838,
+        "avgWinTrade": 55.3125,
+        "avgWinTradePercent": 0.0006471330764797821,
+        "commissionPaid": 0,
+        "grossLoss": 45,
+        "grossLossPercent": 0.000045,
+        "grossLossWC": 45,
+        "grossProfit": 221.25,
+        "grossProfitPercent": 0.00022125,
+        "grossProfitWC": 221.25,
+        "largestLosTrade": 45,
+        "largestLosTradePercent": 0.000581395349,
+        "largestWinTrade": 110,
+        "largestWinTradePercent": 0.00142394822,
+        "marginCalls": 0,
+        "maxContractsHeld": 5,
+        "netProfit": 176.25,
+        "netProfitPercent": 0.00017625,
+        "numberOfLosingTrades": 1,
+        "numberOfWiningTrades": 4,
+        "percentProfitable": 0.8,
+        "profitFactor": 4.916666666666667,
+        "ratioAvgWinAvgLoss": 1.2291666666666667,
+        "totalOpenTrades": 0,
+        "totalTrades": 5
+      },
+      "maxStrategyDrawDown": 125,
+      "openPL": 0,
+      "buyHoldReturn": 406.25,
+      "sharpeRatio": null,
+      "sortinoRatio": null,
+      "maxStrategyDrawDownPercent": 0.000125,
+      "maxStrategyRunUp": 326.25,
+      "maxStrategyRunUpPercent": 0.00032614359565191856,
+      "buyHoldReturnPercent": 0.00040625,
+      "openPLPercent": 0,
+      "buyHoldGainPercent": 0.0004207119741100324,
+      "maxMarginUsed": 0,
+      "avgMarginUsed": 0,
+      "openMarginUsed": 0,
+      "short": {
+        "avgBarsInLossTrade": 0,
+        "avgBarsInTrade": 14.666666666666666,
+        "avgBarsInWinTrade": 14.666666666666666,
+        "avgLosTrade": null,
+        "avgLosTradePercent": null,
+        "avgTrade": 40.41666667,
+        "avgTradePercent": 0.0006360294513976478,
+        "avgWinTrade": 40.41666667,
+        "avgWinTradePercent": 0.0006360294513976478,
+        "commissionPaid": 0,
+        "grossLoss": 0,
+        "grossLossPercent": 0,
+        "grossLossWC": 0,
+        "grossProfit": 121.25,
+        "grossProfitPercent": 0.00012125,
+        "grossProfitWC": 121.25,
+        "largestLosTrade": null,
+        "largestLosTradePercent": null,
+        "largestWinTrade": 71.25,
+        "largestWinTradePercent": 0.000905533456,
+        "marginCalls": 0,
+        "maxContractsHeld": 5,
+        "netProfit": 121.25,
+        "netProfitPercent": 0.00012125,
+        "numberOfLosingTrades": 0,
+        "numberOfWiningTrades": 3,
+        "percentProfitable": 1,
+        "profitFactor": null,
+        "ratioAvgWinAvgLoss": null,
+        "totalOpenTrades": 0,
+        "totalTrades": 3
+      }
+    },
+    "trades": [
+      {
+        "e": {
+          "c": "Buy stop order",
+          "p": 7725,
+          "tm": 1788271800000,
+          "b": 16150,
+          "tp": "le"
+        },
+        "q": 3,
+        "x": {
+          "c": "Sell limit order",
+          "p": 7731,
+          "tm": 1788272460000,
+          "b": 16161,
+          "tp": "lx"
+        },
+        "tp": {
+          "v": 90,
+          "p": 0.00077669905
+        },
+        "cp": {
+          "v": 90,
+          "p": 0.00009
+        },
+        "rn": {
+          "v": 90,
+          "p": 0.00077669905
+        },
+        "v": 115875,
+        "dd": {
+          "v": 75,
+          "p": 0.00064724917
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Buy stop order",
+          "p": 7725,
+          "tm": 1788271800000,
+          "b": 16150,
+          "tp": "le"
+        },
+        "q": 2,
+        "x": {
+          "c": "Sell limit order",
+          "p": 7736,
+          "tm": 1788273000000,
+          "b": 16170,
+          "tp": "lx"
+        },
+        "tp": {
+          "v": 110,
+          "p": 0.0014239482
+        },
+        "cp": {
+          "v": 200,
+          "p": 0.0001099901
+        },
+        "rn": {
+          "v": 110,
+          "p": 0.0014239482
+        },
+        "v": 77250,
+        "dd": {
+          "v": 50,
+          "p": 0.00064724917
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Buy stop order",
+          "p": 7734.25,
+          "tm": 1788272700000,
+          "b": 16165,
+          "tp": "le"
+        },
+        "q": 1,
+        "x": {
+          "c": "Sell limit order",
+          "p": 7736,
+          "tm": 1788273000000,
+          "b": 16170,
+          "tp": "lx"
+        },
+        "tp": {
+          "v": 8.75,
+          "p": 0.00022626629
+        },
+        "cp": {
+          "v": 208.75,
+          "p": 0.00000874825
+        },
+        "rn": {
+          "v": 8.75,
+          "p": 0.00022626629
+        },
+        "v": 38671.25,
+        "dd": {
+          "v": 13.75,
+          "p": 0.0003555613
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Buy stop order",
+          "p": 7734.25,
+          "tm": 1788272700000,
+          "b": 16165,
+          "tp": "le"
+        },
+        "q": 2,
+        "x": {
+          "c": "Bracket Stop Loss",
+          "p": 7735.5,
+          "tm": 1788273720000,
+          "b": 16182,
+          "tp": "lx"
+        },
+        "tp": {
+          "v": 12.5,
+          "p": 0.00016161878
+        },
+        "cp": {
+          "v": 221.25,
+          "p": 0.000012497391
+        },
+        "rn": {
+          "v": 70,
+          "p": 0.00090506516
+        },
+        "v": 77342.5,
+        "dd": {
+          "v": 27.5,
+          "p": 0.0003555613
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Buy stop order",
+          "p": 7740,
+          "tm": 1788273480000,
+          "b": 16178,
+          "tp": "le"
+        },
+        "q": 2,
+        "x": {
+          "c": "Bracket Stop Loss",
+          "p": 7735.5,
+          "tm": 1788273720000,
+          "b": 16182,
+          "tp": "lx"
+        },
+        "tp": {
+          "v": -45,
+          "p": -0.00058139535
+        },
+        "cp": {
+          "v": 176.25,
+          "p": -0.000044990047
+        },
+        "rn": {
+          "v": 2.5,
+          "p": 0.00003229974
+        },
+        "v": 77400,
+        "dd": {
+          "v": 45,
+          "p": 0.00058139535
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Sell stop order",
+          "p": 7730.25,
+          "tm": 1788274560000,
+          "b": 16196,
+          "tp": "se"
+        },
+        "q": 3,
+        "x": {
+          "c": "Buy limit order",
+          "p": 7725.5,
+          "tm": 1788275040000,
+          "b": 16204,
+          "tp": "sx"
+        },
+        "tp": {
+          "v": 71.25,
+          "p": 0.0006144691
+        },
+        "cp": {
+          "v": 247.5,
+          "p": 0.000071237446
+        },
+        "rn": {
+          "v": 71.25,
+          "p": 0.0006144691
+        },
+        "v": 115953.75,
+        "dd": {
+          "v": 30,
+          "p": 0.00025872386
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Sell stop order",
+          "p": 7730.25,
+          "tm": 1788274560000,
+          "b": 16196,
+          "tp": "se"
+        },
+        "q": 1,
+        "x": {
+          "c": "Buy limit order",
+          "p": 7723.25,
+          "tm": 1788275220000,
+          "b": 16207,
+          "tp": "sx"
+        },
+        "tp": {
+          "v": 35,
+          "p": 0.00090553344
+        },
+        "cp": {
+          "v": 282.5,
+          "p": 0.00003499134
+        },
+        "rn": {
+          "v": 35,
+          "p": 0.00090553344
+        },
+        "v": 38651.25,
+        "dd": {
+          "v": 10,
+          "p": 0.00025872386
+        },
+        "cm": 0
+      },
+      {
+        "e": {
+          "c": "Sell stop order",
+          "p": 7730.25,
+          "tm": 1788274560000,
+          "b": 16196,
+          "tp": "se"
+        },
+        "q": 1,
+        "x": {
+          "c": "Bracket Stop Loss",
+          "p": 7727.25,
+          "tm": 1788275880000,
+          "b": 16218,
+          "tp": "sx"
+        },
+        "tp": {
+          "v": 15,
+          "p": 0.00038808575
+        },
+        "cp": {
+          "v": 297.5,
+          "p": 0.000014995764
+        },
+        "rn": {
+          "v": 43.75,
+          "p": 0.0011319168
+        },
+        "v": 38651.25,
+        "dd": {
+          "v": 10,
+          "p": 0.00025872386
+        },
+        "cm": 0
+      }
+    ],
+    "firstTradeIndex": 0
+  }
+}

@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {freezeBacktestDay,publishFrozenBacktestDay} from '../src/core/trading-sync.js';
-import {disconnect} from '../src/connection.js';
+import {disconnect,evaluate} from '../src/connection.js';
 import {isoDate} from './verify-tags.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -114,11 +114,20 @@ export async function publishDay(directory,{publish=publishFrozenBacktestDay}={}
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const [command,dateOrDirectory,directory]=process.argv.slice(2);
   try {
-    const result=command==='freeze' || command==='freeze-chat' || command==='freeze-review'
+    let replayMode=command==='freeze-replay-review';
+    if(command==='freeze-review'){
+      const {preflight}=await import('./capture-review.mjs');await preflight('backtest');
+      // Detect before the drawing-based extractor can model incorrect futures outcomes.
+      const type=await evaluate('window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().mainSeries().symbolInfo().type');
+      replayMode=type==='futures';
+    }
+    const result=replayMode
+      ? await (await import('./replay-backtest-freeze.mjs')).freezeReplayDay(dateOrDirectory,directory)
+      : command==='freeze' || command==='freeze-chat' || command==='freeze-review'
       ? await freezeDay(dateOrDirectory,directory,{notesMode:command==='freeze'?'chart':'chat',questionnaireVersion:command==='freeze-review'?1:undefined})
       : command==='assemble' ? await assembleNotes(dateOrDirectory,directory)
       : command==='publish' ? await publishDay(dateOrDirectory)
-      : (()=>{throw Error('Usage: backtest-freeze.mjs freeze-review|freeze-chat|freeze YYYY-MM-DD NEW_DIRECTORY | assemble DIRECTORY NOTES_JSON | publish DIRECTORY');})();
+      : (()=>{throw Error('Usage: backtest-freeze.mjs freeze-review|freeze-replay-review|freeze-chat|freeze YYYY-MM-DD NEW_DIRECTORY | assemble DIRECTORY NOTES_JSON | publish DIRECTORY');})();
     console.log(JSON.stringify(result,null,2));
   } finally {await disconnect();}
 }

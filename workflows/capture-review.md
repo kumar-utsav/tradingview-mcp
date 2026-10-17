@@ -34,6 +34,10 @@ The pack includes `review-input.json` with immutable trade numbers/source IDs, f
 
 ## 2. Collect answers without accessing TradingView
 
+User update, 2026-10-17: backtests omit the emotions prompt and explicitly mark
+emotion fields skipped. Journal reviews retain all five prompts. Derive the
+remaining four backtest prompts from the same shared registry.
+
 Use five conversational prompts from the registry: entry, risk, management, emotions and exceptions. Extract supplied ordinary dictation; do not ask it twice. Confluences/obstacles belong with entry; missing exact references needed for a comparison get a conditional follow-up. Do not ask all 30 questions per trade.
 
 Each answer is `known`, `missing`, `skipped`, `not_applicable` or `conflicting`, with `source: observed|reported|derived`. Observed facts need evidence references. Missing/skipped/conflicting states need a reason. Never infer emotions, intention, seconds-level timing, chart activation or absence from silence. Preserve disagreements, including recorded outcomes versus reported results, and exclude affected comparisons until resolved. An empty Notes editor is valid.

@@ -5,10 +5,27 @@ description: Capture TradingView backtest trades and evidence first, release the
 
 # Capture Backtest Day
 
+User update, 2026-10-17: skip emotion questions for backtesting and record the
+emotion fields as explicitly skipped. Retain emotion questions for regular
+journaling. Use entry, risk, management and exceptions prompts for backtests.
+
 This local skill always operates in `/Users/utsav/Projects/tradingview-mcp`, even
 when invoked elsewhere. Read and follow the complete, maintained workflow at
 [capture-backtest-day.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-backtest-day.md),
 run its helpers from that project, and keep disposable audit artifacts in the OS temporary directory.
+
+## Futures Replay Trading
+
+For executed futures Replay Trading orders, follow the futures section of the
+maintained workflow. `freeze-review` routes futures to `freeze-replay-review`:
+capture unique fills and matched lots, group flat-to-flat trades, reconcile
+contract point value/P&L, and inspect isolated screenshots before release.
+Do not use drawing-modeled outcomes or turn partial exits into separate review
+trades. This mode secures a local fill ledger and resumable review. Publication
+requires the backend registry's `capabilities.replay_fills:true` and uses the
+dedicated replay ingestion endpoint; otherwise retain the pack locally. Never
+send replay records through drawing ingestion. Keep actual exits/P&L separate from current
+drawing geometry and leave initial risk/realized R unknown without evidence.
 
 ## Structured capture review v1
 

@@ -259,7 +259,7 @@ export const activeChartBoundsExpression = `
   })()
 `;
 
-async function captureChartScreenshot(evaluate = defaultEvaluate) {
+export async function captureChartScreenshot(evaluate = defaultEvaluate) {
   const client = await getClient();
   const bounds = await evaluate(activeChartBoundsExpression);
   const params = { format: "png" };
@@ -1356,7 +1356,7 @@ export function restorePositionIsolationExpression(sessionKey) {
   `;
 }
 
-async function captureIsolatedTradeScreenshots(trades, inventory, deps, dayScreenshot) {
+export async function captureIsolatedTradeScreenshots(trades, inventory, deps, dayScreenshot) {
   if (!trades.length) return [];
   const drawingIds = new Map(
     inventory.map((position) => [position.source_id, position.drawing_id]),
@@ -1645,7 +1645,7 @@ export function frozenChartEvidenceExpression(date, identityOnly = false, includ
     var previous = dates.length ? dates[dates.length-1] : null;
     var selected = dated.filter(function(x) {return x.date===target || x.date===previous;});
     var info=null;try {info=chart._chartWidget.model().mainSeries().symbolInfo();} catch (_) {}
-    return {identity:identity,instrument:{tick_size:info&&info.minmov/info.pricescale}, chart_date:target, previous_loaded_date:previous,
+    return {identity:identity,instrument:{tick_size:info&&info.minmov/info.pricescale,type:info&&info.type,point_value:info&&info.pointvalue,currency:info&&info.currency_code}, chart_date:target, previous_loaded_date:previous,
       drawings:shapes, bars:selected.slice(-5000).map(function(x) {return x.value.slice(0,6);}),
       bars_truncated:selected.length>5000,
       history_note:'Loaded bars only; missing history remains unknown, not a complete session claim.',
@@ -1673,6 +1673,7 @@ export async function freezeBacktestDay({ date, persist, notesMode = 'chart', qu
   const annotated = {mime_type:'image/png', base64:await deps.captureScreenshot(deps.evaluate)};
   if (!annotated.base64) throw new Error('Annotated screenshot was empty');
   const evidence = await deps.evaluate(frozenChartEvidenceExpression(date, false, readChartNotes));
+  if(evidence.instrument?.type==='futures')throw new Error('Use backtest-freeze.mjs freeze-replay-review for futures; drawing-based outcomes do not capture actual replay fills');
   if (JSON.stringify(evidence.identity) !== identity) throw new Error('Chart changed during the annotated capture; keep it unchanged and retry');
   await unchanged();
   const day = await readBacktestDay(date, deps, readChartNotes);
@@ -1723,6 +1724,7 @@ export async function freezeBacktestDay({ date, persist, notesMode = 'chart', qu
 
 /** Network-only phase: no chart reads, note cleanup, undo or view restoration. */
 export async function publishFrozenBacktestDay(bundle, { _deps } = {}) {
+  if (bundle?.capture_kind === 'replay_fills') throw new Error('Replay fill packs require a fill-aware backend; legacy ingestion would discard transactions');
   if (bundle?.version !== 1 || !bundle.idempotency_key || !bundle.payload?.screenshot?.base64
     || !bundle.annotated_screenshot?.base64 || !Array.isArray(bundle.note_audit)
     || !Array.isArray(bundle.payload.trades)
@@ -1750,4 +1752,10 @@ export async function publishFrozenBacktestDay(bundle, { _deps } = {}) {
     ...(rejectedNotes.length ? {trade_note_cleanup_warning:'Some captured notes belong to rejected trades. Keep recovery.json; restoration requires explicit user direction, never an automatic chart undo after release.'} : {}),
     tag_review:{...(result.tag_review || {}),chart_review_required:true,workflow_complete:false,
       next_action:'Review frozen local chart evidence and saved app records, save supported tags and independently read them back. Preserve existing resources; do not search for or attach videos. Do not read or mutate the live chart after release.'}};
+}
+
+/** Fill-aware, network-only publication. Evidence is read from a sealed local pack. */
+export async function publishReplayCapture(payload,idempotencyKey,{_deps}={}){
+  if(payload?.capture_kind!=='replay_fills'||!idempotencyKey)throw new Error('Sealed replay capture required');
+  return postCapture('/ingestion/backtest/replay','backtest.replay',payload,idempotencyKey,dependencies(_deps));
 }
