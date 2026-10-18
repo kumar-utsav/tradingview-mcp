@@ -1,6 +1,6 @@
 # TradingView MCP — Codex Instructions
 
-95 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+99 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -58,6 +58,7 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 4. `replay_trade` with `action: "buy"/"sell"/"close"` → execute trades
 5. `replay_status` → check position, P&L, current date
 6. `replay_stop` → return to realtime
+7. `replay_to_session_cutoff` → replay to a date and stop at the 6:30 AM or 9:00 AM Pacific cutoff (cutoff candle included) — aligns replay with Pacific capture dates
 
 ### "Screen multiple symbols"
 - `batch_run` with `symbols: ["ES1!", "NQ1!", "YM1!"]` and `action: "screenshot"` or `"get_ohlcv"`
@@ -83,6 +84,61 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "TradingView isn't running"
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
+
+### "Check my strategy / backtest results"
+- `data_get_strategy_results` → Strategy Tester performance metrics (auto-opens the panel, auto-unhides hidden strategies)
+- `data_get_trades` → trade list from Strategy Tester
+- `data_get_equity` → equity curve from Strategy Tester
+
+### "Monitor zones in the background (zero-token)"
+- `strategy_monitor_start` → start break-and-retest monitoring (zones default to manual chart rectangles; session/blackouts configurable)
+- `strategy_monitor_events` with `after_id` → read only new compact events without resending chart history
+- `strategy_monitor_status` → running state + compact per-zone state
+- `strategy_monitor_snapshot` → one-shot evaluation of current rectangle zones (1-minute chart by default)
+- `strategy_monitor_stop` → stop the monitor
+
+### "Manage tabs, panes and layouts"
+- `tab_list` / `tab_new` / `tab_switch` / `tab_close` → chart tabs (a new tab can open a saved layout)
+- `pane_list` / `pane_set_layout` (single, 2h, 2v, 4, 6, 8) / `pane_focus` / `pane_set_symbol` → multi-pane grids
+- `layout_list` / `layout_new` / `layout_switch` → saved layouts
+
+### "Watchlist and symbols"
+- `watchlist_get` / `watchlist_add` / `watchlist_add_bulk` / `watchlist_remove` → manage the watchlist
+- `symbol_search` → find symbols by keyword (type filter: stock, futures, crypto, forex)
+- `symbol_info` → metadata for the current symbol (exchange, type, description)
+
+### "Manage indicators"
+- `indicator_search` → search the Indicators dialog (built-ins, community scripts, My scripts)
+- `indicator_add` → add by name, works for strategies and community scripts (returns the new entity_id)
+- `indicator_set_inputs` → change indicator settings (length, source, etc.)
+- `indicator_toggle_visibility` → show/hide a study
+
+### "Interact with the UI"
+- `ui_find_element` / `ui_click` / `ui_hover` → locate and act on elements (by text, aria-label, data-name)
+- `ui_type_text` / `ui_keyboard` → type into the focused input / press keys or shortcuts
+- `ui_scroll` / `ui_mouse_click` → scroll the chart or page / click exact coordinates
+- `ui_evaluate` → run JavaScript in the TradingView page (advanced)
+
+### "Advanced drawing control"
+- `draw_get_properties` → read properties and points of a drawing
+- `draw_set_tooltip` / `draw_cleanup_tooltips` → attach or clean up hover-only tooltips
+- `draw_set_visual_order` → bring_to_front / send_to_back
+
+### "More Pine tools"
+- `pine_compile` → compile/add the current script; `pine_smart_compile` → also auto-detects the compile button and reports study changes
+- `pine_list_scripts` → list saved scripts
+- `pine_analyze` → offline static analysis without compiling or a chart connection
+- `pine_check` → compile-check via TradingView's server API without the chart open
+
+### "Diagnostics and extras"
+- `tv_discover` → report which TradingView API paths are available
+- `tv_ui_state` → which panels are open, button visibility/enabled state
+- `tv_update` → git fast-forward update of this MCP server (refuses dirty/diverged trees; restart required after)
+- `depth_get` → order book / DOM (Depth of Market) data
+- `chart_get_visible_range` → visible date range + bars on screen
+
+### "Capture my trading day"
+- `capture_backtest_day` / `capture_backtest_batch` / `capture_journal_call_trade` / `capture_journal_put_trade` / `capture_journal_call_miss` / `capture_journal_put_miss` → personal capture workflows — never invoke ad hoc, see "Personal capture workflows" below
 
 ## Context Management Rules
 
