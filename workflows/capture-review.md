@@ -70,8 +70,11 @@ duplicates and prices/times as tags. Never invent a versioned-question key throu
 generic tag routes. This permission supersedes the catalog-creation restriction
 for ordinary checklist items only; it does not authorize schema migrations,
 historical backfills or changing shared-question semantics. Save ordinary
-checklist selections through the existing tag path, preserving structured
-selections and concurrent edits, then refresh the review baseline. Verify any
+checklist selections through the editable checklist save contract
+(`checklist_tags` on the capture-review request when available), preserving the
+full fresh selection, structured answers and concurrent edits. Use the existing
+tag path only for non-owned legacy selections. Refresh the review baseline
+before saving the note summary; checkbox-only autosave must preserve it. Verify any
 new item is visible and selected in Review. No new item is needed when existing
 questions capture the concept.
 
