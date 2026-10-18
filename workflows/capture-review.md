@@ -40,7 +40,45 @@ remaining four backtest prompts from the same shared registry.
 
 Use five conversational prompts from the registry: entry, risk, management, emotions and exceptions. Extract supplied ordinary dictation; do not ask it twice. Confluences/obstacles belong with entry; missing exact references needed for a comparison get a conditional follow-up. Do not ask all 30 questions per trade.
 
-Each answer is `known`, `missing`, `skipped`, `not_applicable` or `conflicting`, with `source: observed|reported|derived`. Observed facts need evidence references. Missing/skipped/conflicting states need a reason. Never infer emotions, intention, seconds-level timing, chart activation or absence from silence. Preserve disagreements, including recorded outcomes versus reported results, and exclude affected comparisons until resolved. An empty Notes editor is valid.
+Each answer is `known`, `missing`, `skipped`, `not_applicable` or `conflicting`, with `source: observed|reported|derived`. Observed facts need evidence references. Missing/skipped/conflicting states need a reason. Never infer emotions, intention, seconds-level timing, chart activation or absence from silence. Preserve disagreements, including recorded outcomes versus reported results, and exclude affected comparisons until resolved.
+
+### Trade notes and Review checklist items
+
+For each trade with user notes/dictation, write a concise plain-text
+`document.note_summary` covering the supplied setup/entry, stop rationale, adds,
+partial exits, final exit and exceptions. Include corrections and meaningful
+reasons for not adding. Do not invent missing details or substitute chart
+inference for the user's account. Preserve reported/recorded conflicts explicitly.
+The backend saves this summary into the existing Trade Notes editor atomically
+with the review/checklist. Preserve original notes; update only the capture-owned
+summary block. Raw dictation stays in the pack. Use per-trade `no_note:true` only
+when the user supplies no note or explicitly declines, never to discard supplied
+dictation. New inputs require a summary or that explicit choice before assembly;
+existing sealed packs retain their recorded input.
+
+When the user says "tags," they mean selectable checklist items in the trade's
+Review section. Fetch the current catalog and review every applicable group
+against their notes, choosing existing items first. Select only supported facts;
+unknown is not No, and a reported break/retest does not establish displacement
+or a candle-close confirmation. Structured selections own their generated tags;
+use the capture-review endpoint for them.
+
+The user authorizes creating a new checklist item for a meaningful, reusable
+concept in their notes only when no existing equivalent exists. Use the existing
+catalog and most appropriate group, with a clear label and description. Avoid
+duplicates and prices/times as tags. Never invent a versioned-question key through
+generic tag routes. This permission supersedes the catalog-creation restriction
+for ordinary checklist items only; it does not authorize schema migrations,
+historical backfills or changing shared-question semantics. Save ordinary
+checklist selections through the existing tag path, preserving structured
+selections and concurrent edits, then refresh the review baseline. Verify any
+new item is visible and selected in Review. No new item is needed when existing
+questions capture the concept.
+
+For later notes/corrections on a saved trade, retain the original sealed pack,
+store an amendment with the trade mapping/raw text, read current fingerprints,
+and update its summary and supported checklist answers with a fresh stable
+request ID. Independently verify Notes and Review. Amendments use no TradingView.
 
 Keep original dictation in `raw_dictation` in the input. Use at most three short exception bullets per trade (300 characters each); preserve existing notes. Store prices, times, quantities and distances as measurements, not tag text. Store each obstacle and its behavior together under one linked ID. Management events include planned targets/partial quantities and actual decisions as separate rows with provenance.
 
@@ -57,7 +95,7 @@ Use the normal repository ingestion environment for publishing; do not print cre
 
 The backend routes are identical for journal/backtest: GET `/:page/:id/capture-review`, PUT the same route, GET `/:page/capture-review/registry`, POST `/:page/capture-review/query` with explicit selected `trade_ids` and `filter`. PUT requires `expected_revision`, `trade_fingerprint`, `evidence_fingerprint` (null for a new review), stable `request_id`, `document`, and optionally cached `evidence`.
 
-The backend recomputes research, hashes shared session evidence, atomically saves review/revision plus generated `capture_v1__…` tags and owned rich-text exception bullets. Legacy tags/notes remain intact. A stale update returns 409. Do not work around catalog errors with generic tag writes. Definitions are installed only by the explicit additive catalog installer after the database migration; do not restore the CSV's old catalog.
+The backend recomputes research, hashes shared session evidence, atomically saves review/revision plus generated `capture_v1__…` tags, the supplied trade-note summary and owned rich-text exception bullets. Legacy tags/notes remain intact. A stale update returns 409. Do not work around catalog errors with generic tag writes. Definitions are installed only by the explicit additive catalog installer after the database migration; do not restore the CSV's old catalog.
 
 The shared Checklist component owns new selections. Generic checkbox/tag writes cannot change projected tags. App lists, declarative filters, reports and MCP use the shared matcher/statistics. Included tags default ALL; exclude ANY. Old MCP callers retain their historical semantics. Linked obstacle/scenario conditions must match the same row. Missing is not No. Each trade counts once. Stale/conflicting evidence is excluded from affected research; counts remain visible.
 

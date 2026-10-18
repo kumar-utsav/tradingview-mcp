@@ -30,7 +30,7 @@ test('seals replay evidence and permits offline review assembly; publishing fail
   assert.equal(ready.chart_released,true);assert.equal(ready.ingestion_complete,false);assert.equal(ready.fill_count,10);
   const info=await inspectPack(f.directory);assert.equal(info.trades.length,2);
   const inputFile=path.join(f.directory,'review-input.json'),input=JSON.parse(await fs.readFile(inputFile));
-  input.user_finished=true;input.raw_dictation='Finish; unknown intentions in this test';
+  input.user_finished=true;input.raw_dictation='Finish; unknown intentions in this test';for(const row of input.trades)row.document.note_summary='No trade intentions supplied in this test.';
   for(const t of input.trades)for(const answer of Object.values(t.document.answers)){answer.status='skipped';answer.reason='Explicitly skipped by user';}
   await fs.writeFile(inputFile,JSON.stringify(input));await assemble(f.directory,inputFile);
   const assembled=JSON.parse(await fs.readFile(path.join(f.directory,'structured-answers.json')));
@@ -68,7 +68,7 @@ test('missing per-trade image cannot seal a successful pack',async t=>{
 
 test('fill-aware publication verifies transactions and can retry reviews without chart access',async t=>{
   const f=await setup(t);await freezeReplayDay('2026-09-01',f.directory,{deps:f.deps});
-  const inputPath=path.join(f.directory,'review-input.json'),input=JSON.parse(await fs.readFile(inputPath));input.user_finished=true;
+  const inputPath=path.join(f.directory,'review-input.json'),input=JSON.parse(await fs.readFile(inputPath));input.user_finished=true;for(const row of input.trades)row.no_note=true;
   for(const row of input.trades)for(const answer of Object.values(row.document.answers)){answer.status='skipped';answer.reason='User skipped in this fixture';}
   await fs.writeFile(inputPath,JSON.stringify(input));await assemble(f.directory,inputPath);
   const info=await inspectPack(f.directory),reads=f.reads(),keys=[],documents=new Map();let records=[];

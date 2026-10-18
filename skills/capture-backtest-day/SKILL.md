@@ -14,6 +14,18 @@ when invoked elsewhere. Read and follow the complete, maintained workflow at
 [capture-backtest-day.md](/Users/utsav/Projects/tradingview-mcp/workflows/capture-backtest-day.md),
 run its helpers from that project, and keep disposable audit artifacts in the OS temporary directory.
 
+## User notes and Review checklist
+
+Summarize every supplied trade note/dictation in `document.note_summary` so it
+appears in Trade Notes alongside the structured Review. Preserve raw dictation,
+existing notes and user corrections. Do not silently publish supplied notes as
+NO NOTE. Follow the shared workflow's summary and amendment contract.
+
+"Tags" means the checklist items in Review. Select supported existing items first;
+the user authorizes creating an ordinary checklist item when a reusable concept
+has no equivalent. Verify Notes and visible selections after saving. Do not
+invent missing facts, duplicate concepts or versioned-question definitions.
+
 ## Futures Replay Trading
 
 For executed futures Replay Trading orders, follow the futures section of the

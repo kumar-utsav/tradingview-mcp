@@ -65,7 +65,7 @@ export async function inspectPack(pack){
 }
 export async function prepare(pack){
  const info=await inspectPack(pack);if(!info.structured)throw Error('Existing legacy captures retain their original notes mode');
- const result={version:1,date:info.date,page_type:info.page_type,pack_id:path.basename(pack),user_finished:false,prompts:capturePrompts(info.page_type),raw_dictation:'',trades:info.ordered.map(t=>({number:t.number,source_id:t.source_id,...(t.trade_id?{trade_id:t.trade_id}:{}),document:{version:1,pack_id:path.basename(pack),source_id:t.source_id,answers:captureAnswers(info.page_type),references:{direction:t.direction||(t.type.toLowerCase()==='call'?'long':'short')},observations:{obstacles:[],stop_changes:[],management_events:[]},exceptions:[]}}))};
+ const result={version:1,date:info.date,page_type:info.page_type,pack_id:path.basename(pack),user_finished:false,note_summary_required:true,prompts:capturePrompts(info.page_type),raw_dictation:'',trades:info.ordered.map(t=>({number:t.number,source_id:t.source_id,...(t.trade_id?{trade_id:t.trade_id}:{}),document:{version:1,pack_id:path.basename(pack),source_id:t.source_id,note_summary:'',answers:captureAnswers(info.page_type),references:{direction:t.direction||(t.type.toLowerCase()==='call'?'long':'short')},observations:{obstacles:[],stop_changes:[],management_events:[]},exceptions:[]}}))};
  await write(path.join(pack,'review-input.json'),result);return {date:info.date,trades:info.ordered,prompts:capturePrompts(info.page_type),questionnaire_version:1,tradingview_used:false};
 }
 export async function assemble(pack,inputPath){
@@ -74,6 +74,7 @@ export async function assemble(pack,inputPath){
  const seen=new Set();const rows=[];
  for(const n of input.trades){const t=info.ordered.find(t=>t.number===n.number&&t.source_id===n.source_id);if(!t||seen.has(n.source_id))throw Error('Frozen question mapping changed or duplicated');seen.add(n.source_id);
   const doc=shared.validateReview(n.document);
+  if(input.note_summary_required===true&&!doc.note_summary?.trim()&&n.no_note!==true)throw Error('Trade '+n.number+': provide a summary of the user notes or explicit no_note before finishing');
   if(Object.values(doc.answers).some(a=>a.status==='missing'&&a.reason==='Not supplied'))throw Error('Unanswered topics remain: mark explicitly unknown, skipped or not applicable before finishing');
   if(doc.pack_id!==path.basename(pack)||doc.source_id!==t.source_id)throw Error('Document source mapping mismatch');
   const trade=info.trades.find(x=>String(x.id)===t.source_id||x.source_id===t.source_id),evidence=info.evidenceFor(trade);
@@ -145,6 +146,7 @@ export async function publish(pack,{base=process.env.TRADING_API_URL||process.en
    if(payload.request_id!==candidate.request_id||hash({document:payload.document,evidence:payload.evidence})!==hash({document:candidate.document,evidence:candidate.evidence}))throw Error('Saved request differs from sealed answers/evidence');
    const result=await api(`/${info.page_type}/${t.trade_id}/capture-review`,payload),verify=await api(`/${info.page_type}/${t.trade_id}/capture-review`);
    if(result.document?.stale||verify.document?.stale||verify.revision!==result.revision||hash(verify.document)!==hash(result.document))throw Error('Structured review read-back mismatch: '+t.source_id);
+   if(typeof document.note_summary==='string'&&document.note_summary.trim()){const rows=await api('/'+info.page_type+'/'),trade=rows.find(row=>row.id===t.trade_id),rendered=shared.summaryNotes('',document.note_summary);if(!trade||!String(trade.notes||'').includes(rendered))throw Error('Trade note summary read-back mismatch: '+t.source_id);}
    progress.push({number:t.number,trade_id:t.trade_id,revision:verify.revision,verified:true});
    await fs.writeFile(path.join(pack,'structured-save-progress.json'),JSON.stringify(progress,null,2));
   }

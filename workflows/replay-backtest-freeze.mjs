@@ -78,9 +78,9 @@ export async function freezeReplayDay(date,directory,{deps={}}={}){
   await write(path.join(directory,'frozen.json'),json(frozen));
   await write(path.join(directory,'ledger.json'),json(ledger));
   await write(path.join(directory,'report.md'),replayReport(ledger));
-  await write(path.join(directory,'review-input.json'),json({version:1,capture_kind:'replay_fills',date,page_type:'backtest',pack_id:path.basename(directory),user_finished:false,
+  await write(path.join(directory,'review-input.json'),json({version:1,capture_kind:'replay_fills',date,page_type:'backtest',pack_id:path.basename(directory),user_finished:false,note_summary_required:true,
     prompts:capturePrompts('backtest'),raw_dictation:'',trades:ledger.trades.map((t,i)=>({number:i+1,source_id:t.source_id,
-      document:{version:1,pack_id:path.basename(directory),source_id:t.source_id,answers:captureAnswers('backtest'),references:{direction:t.direction},
+      document:{version:1,pack_id:path.basename(directory),source_id:t.source_id,note_summary:'',answers:captureAnswers('backtest'),references:{direction:t.direction},
         observations:{obstacles:[],stop_changes:[],management_events:[]},exceptions:[]}}))}));
   const files=['replay-raw.json','annotated-start.png','recovery.json','day.png','frozen.json','ledger.json','report.md',...images.map((_,i)=>`position-${i+1}.png`)];
   const hashes=Object.fromEntries(await Promise.all(files.map(async name=>[name,sha(await fs.readFile(path.join(directory,name)))])));
