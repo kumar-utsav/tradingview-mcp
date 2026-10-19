@@ -112,12 +112,8 @@ Label results research within captured setups. Skipped opportunities are outside
 
 ## 5. Completion and recovery
 
-Publish returns `api_verified_ui_pending`. Verify the existing Checklist tab visibly shows saved selections and tags, filters return the same IDs/statistics as the API/MCP contract, and CSV export/import preserves review/evidence/revisions in an isolated database. Do not restore a backup into live history as verification.
+User update, 2026-10-18: routine captures finish through the trading MCP and APIs. Do not open the trading app for screen checks, export CSV backups, or run backup/restore tests as part of capture. These require a separate user request. This supersedes the former visible-checklist and backup verification requirements for both capture workflows.
 
-Record `{date,tradingview_used:false,backup_verified:true,filter_statistics_verified:true,trades:[{trade_id,revision,checklist_verified:true,tags_verified:true,evidence:"saved screenshot or inspection reference"}]}` as proof, then:
+Publish independently reads back the saved review, exact note summary and generated checklist tags, and verifies the source-to-record mapping, screenshots and execution facts through the existing capture save path. It records `status: complete` in `structured-save-result.json` and `structured-complete.json`. Preserve raw dictation, frozen evidence, retry requests and scoped pre-save recovery snapshots; these are capture recovery files, not a backup export/restore exercise. Missing or conflicting details stay explicit. A save/read-back failure remains incomplete and resumable.
 
-```sh
-node workflows/capture-review.mjs verify-visible /absolute/pack /absolute/proof.json
-```
-
-This is a verification receipt, not an automatic UI test. Do not claim visual verification from the receipt alone. Preserve completed packs and useful tests; remove only task-owned temporary audits/servers after verification. Deployment and historical rewriting remain separate actions.
+Preserve completed packs and useful tests; remove only task-owned temporary audits/servers after verification. Deployment and historical rewriting remain separate actions.

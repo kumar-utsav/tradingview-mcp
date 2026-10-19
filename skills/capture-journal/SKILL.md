@@ -23,8 +23,9 @@ dictation locally. Existing pending packs keep their recorded version. The user 
 default for new captures: run the shared read-only readiness check before chart
 access; use `journal-pack.mjs create-review` for Journal and
 `backtest-freeze.mjs freeze-review` for Backtest. Follow the shared workflow
-through API, visible checklist/filter/statistic and recoverable-backup
-verification. Do not backfill history or migrate catalogs during capture.
+through API read-back verification. User update, 2026-10-18: omit trading-app
+screen checks, backup exports and restore tests from routine capture; finish once
+trades, screenshots, notes and checklist selections are saved and verified. Do not backfill history or migrate catalogs during capture.
 
 The instructions below describe the legacy mode and unchanged chart safeguards.
 

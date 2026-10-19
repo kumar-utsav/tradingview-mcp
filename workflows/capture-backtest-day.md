@@ -86,10 +86,7 @@ stores immutable `replay_execution` JSON with instrument metadata, fills, matche
 lots and raw source orders, and keeps planned stop/target/RR unset. App records
 use Long/Short direction. The Transactions tab shows actual exposure changes and
 expandable matched lots. Dedicated replay P/L, fill-count and peak-size filters
-never apply option multipliers or invent facts for legacy drawings. CSV backup
-includes the JSON, review evidence and revisions. Verify the visible Checklist,
-Transactions tab, filter/statistics and isolated backup round trip before
-marking a deployed capture complete.
+never apply option multipliers or invent facts for legacy drawings. Verify saved notes, checklist tags, screenshots and execution facts through the trading MCP/APIs. Do not perform trading-app screen checks, CSV backup exports or restore tests during routine capture (user update, 2026-10-18).
 
 If capability verification fails, report “local evidence secured; app save
 pending deployment,” never “saved/complete.” Legacy ingestion rejects replay

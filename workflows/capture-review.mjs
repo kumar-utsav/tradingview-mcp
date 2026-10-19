@@ -146,14 +146,20 @@ export async function publish(pack,{base=process.env.TRADING_API_URL||process.en
    if(payload.request_id!==candidate.request_id||hash({document:payload.document,evidence:payload.evidence})!==hash({document:candidate.document,evidence:candidate.evidence}))throw Error('Saved request differs from sealed answers/evidence');
    const result=await api(`/${info.page_type}/${t.trade_id}/capture-review`,payload),verify=await api(`/${info.page_type}/${t.trade_id}/capture-review`);
    if(result.document?.stale||verify.document?.stale||verify.revision!==result.revision||hash(verify.document)!==hash(result.document))throw Error('Structured review read-back mismatch: '+t.source_id);
-   if(typeof document.note_summary==='string'&&document.note_summary.trim()){const rows=await api('/'+info.page_type+'/'),trade=rows.find(row=>row.id===t.trade_id),rendered=shared.summaryNotes('',document.note_summary);if(!trade||!String(trade.notes||'').includes(rendered))throw Error('Trade note summary read-back mismatch: '+t.source_id);}
+   const savedRows=await api('/'+info.page_type+'/'),savedTrade=savedRows.find(row=>row.id===t.trade_id);
+   if(!savedTrade)throw Error('Saved trade missing: '+t.source_id);
+   const savedTags=typeof savedTrade.tags==='string'?JSON.parse(savedTrade.tags):savedTrade.tags||[];
+   if(hash(savedTags.filter(k=>k.startsWith('capture_v1__')).sort())!==hash(shared.projectedTags(verify.document)))throw Error('Checklist tag read-back mismatch: '+t.source_id);
+   if(typeof document.note_summary==='string'&&document.note_summary.trim()&&!String(savedTrade.notes||'').includes(shared.summaryNotes('',document.note_summary)))throw Error('Trade note summary read-back mismatch: '+t.source_id);
    progress.push({number:t.number,trade_id:t.trade_id,revision:verify.revision,verified:true});
    await fs.writeFile(path.join(pack,'structured-save-progress.json'),JSON.stringify(progress,null,2));
   }
   if(hash(dailyBefore)!==hash(await api('/'+info.page_type+'/daily-notes')))throw Error('Daily notes/resources changed during save; inspect before retrying');
-  await fs.writeFile(path.join(pack,'structured-save-result.json'),JSON.stringify({date:info.date,status:'api_verified_ui_pending',tradingview_used:false,trades:progress},null,2));
+  const completion={date:info.date,status:'complete',tradingview_used:false,trades:progress,verification:{method:'api',notes_verified:true,checklist_tags_verified:true,review_readback_verified:true,backup_restore_required:false,screen_checks_required:false}};
+  await fs.writeFile(path.join(pack,'structured-save-result.json'),JSON.stringify(completion,null,2));
+  await fs.writeFile(path.join(pack,'structured-complete.json'),JSON.stringify(completion,null,2));
   completed=true;
-  return {date:info.date,status:'api_verified_ui_pending',trades:progress,tradingview_used:false};
+  return completion;
  }catch(error){await fs.writeFile(path.join(pack,'structured-save-failure.json'),JSON.stringify({error:error.message,attempt,progress},null,2));throw error;}
  finally{if(completed)await fs.rm(attempt,{recursive:true,force:true});}
 }
