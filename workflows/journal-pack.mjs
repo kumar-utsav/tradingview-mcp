@@ -1,7 +1,11 @@
+import {isFuturesJournal,journalTargetExit} from './journal-instrument.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import {appendSummary} from './capture-notes.mjs';
+import {assertCapturePath} from './capture-paths.mjs';
+import {entryAnnotationSnapshot} from './journal-entries.mjs';
 import { fingerprint, isoDate, reviewTemplate, positionRR, validateChartAnnotations } from './journal-capture.mjs';
 
 // Deliberately no TradingView connection or API calls: continuation uses files only.
@@ -27,7 +31,7 @@ function checkEvidence(evidence,snapshot,review) {
     const entry=source.bars.find(b=>b.time===a.position_start_candle_time);
     const short=a.position_tool==='short_position',window=source.bars.filter(b=>b.time>=Math.min(...times.slice(1))&&b.time<=a.position_end_candle_time);
     const extreme=short?Math.min(...window.map(b=>b.low)):Math.max(...window.map(b=>b.high));
-    if(a.position_entry_price!==(short?entry.low:entry.high)||a.position_target_price!==extreme)throw Error(`Cached entry/MFE mismatch: ${trade.id}`);
+    if(a.position_entry_price!==(isFuturesJournal(trade)?[...trade.transactions].sort((a,b)=>Date.parse(a.filledTime)-Date.parse(b.filledTime))[0].price:(short?entry.low:entry.high))||a.position_target_price!==(['final_exit_v1','farthest_exit_v2'].includes(a.position_policy)&&a.exit_band==='target'?(a.position_policy==='farthest_exit_v2'?journalTargetExit(trade).price:[...trade.transactions].sort((a,b)=>Date.parse(a.filledTime)-Date.parse(b.filledTime)).at(-1).price):extreme))throw Error(`Cached entry/MFE mismatch: ${trade.id}`);
     const mfe=source.bars.find(b=>b.time===a.position_mfe_candle_time);
     if(!mfe||(short?mfe.low:mfe.high)!==extreme)throw Error(`Cached MFE candle mismatch: ${trade.id}`);
     for(const key of ['pm','pd','5m','15m']) {
@@ -41,6 +45,8 @@ function checkEvidence(evidence,snapshot,review) {
 }
 
 export async function createPack(config,outputDir) {
+  outputDir=assertCapturePath(outputDir);
+  if(config.notes_only)config={...config,questionnaire_version:undefined};
   const [snapshot,review,evidence,release]=await Promise.all([config.snapshot_path,config.review_path,config.evidence_path,config.release_path].map(load));
   const date=isoDate(snapshot.date);
   if(!snapshot.trades.length||review.skipped?.length||!sameIDs(snapshot.trades,review.trades)||new Set(review.trades.map(x=>x.id)).size!==review.trades.length)throw Error('A complete capture for every frozen trade is required');
@@ -71,11 +77,36 @@ export async function createPack(config,outputDir) {
   const handoff=config.questionnaire_version===1?'Answer the five prompts in chat; exceptions are optional. Say finish when ready. See [review-input.json](review-input.json).':'Add numbered notes in chat or [notes.md](notes.md), then say continue.';
   const gallery=`# Journal capture ${date}\n\nTradingView is released. Screenshots and native RR are captured; nothing has been saved to the journal yet. ${handoff}\n\n${ordered.map(t=>`## Trade ${t.number} | ID ${t.trade_id}\n\n${t.ticker} ${t.type} - entry ${t.entry_candle} - native RR ${review.trades.find(x=>x.id===t.trade_id).rr}\n\n![Trade ${t.number}](trade-${t.trade_id}.png)\n\n`).join('')}`;
   await fs.writeFile(path.join(packDir,'capture-pack.md'),gallery,{flag:'wx'});
-  const state={version:1,...(config.questionnaire_version===1?{questionnaire_version:1}:{}),mode:'capture_first',phase:'awaiting_notes',date,created_at:new Date().toISOString(),tradingview_released:true,ordered,image_hashes:imageHashes,sealed_file_hashes:sealedFiles};
+  let entryOrdered;
+  if(config.notes_only&&!config.trade_chart_only){
+    const views=entryAnnotationSnapshot(snapshot);
+    let entryReview;
+    if(config.entry_review_path){entryReview=await load(config.entry_review_path);for(const e of views.mapping.filter(e=>e.entry_count===1)){if(!entryReview.trades.some(r=>r.id===e.virtual_id))entryReview.trades.push({...review.trades.find(r=>r.id===e.journal_id),id:e.virtual_id});}}
+    else {
+      if(views.mapping.some(e=>e.entry_count>1))throw Error('Multi-entry journal trades require separately reviewed entry screenshots before release');
+      entryReview={trades:views.mapping.map(e=>({...review.trades.find(r=>r.id===e.journal_id),id:e.virtual_id}))};
+    }
+    if(entryReview.skipped?.length||entryReview.trades.length!==views.mapping.length)throw Error('Every journal entry needs an accepted screenshot');
+    const entries=[],imageIDs=new Set();
+    for(const mapped of views.mapping){
+      const row=entryReview.trades.find(r=>r.id===mapped.virtual_id),trade=views.snapshot.trades.find(t=>t.id===mapped.virtual_id);
+      if(!row||!row.chart_reviewed||!row.chart_annotations?.commentary_free)throw Error('Visually reviewed entry PNG required');
+      validateChartAnnotations(row,trade);
+      if(row.rr!==positionRR(row.chart_annotations))throw Error('Native entry RR mismatch');
+      const bytes=await fs.readFile(row.chart_path);if(!png(bytes)||imageIDs.has(hash(bytes)))throw Error('Unique PNG required for each journal entry');imageIDs.add(hash(bytes));
+      const file=`entry-${mapped.virtual_id}.png`;await fs.writeFile(path.join(packDir,file),bytes,{flag:'wx'});sealedFiles[file]=hash(bytes);
+      entries.push({...mapped,rr:row.rr,rr_evidence:row.chart_annotations.position_rr,chart_annotations:row.chart_annotations,chart_file:file});
+    }
+    checkEvidence(evidence,views.snapshot,{trades:entryReview.trades});
+    const content=JSON.stringify({date,entries},null,2);await fs.writeFile(path.join(packDir,'entry-captures.json'),content,{flag:'wx'});sealedFiles['entry-captures.json']=hash(content);
+    await fs.appendFile(path.join(packDir,'capture-pack.md'),'\n## Individual entry views\n\n'+entries.map(e=>`### Imported ID ${e.journal_id} · Entry ${e.entry_index} of ${e.entry_count}\n\nNative tool RR ${e.rr} · Source key ${e.entry_key}\n\n![Entry ${e.entry_index}](${e.chart_file})\n`).join('\n'));
+    entryOrdered=entries.map(e=>({number:`${ordered.find(t=>t.trade_id===e.journal_id).number}.${e.entry_index}`,trade_id:e.journal_id,entry_key:e.entry_key,entry_index:e.entry_index,entry_count:e.entry_count,entry_time:e.entry_time,chart_file:e.chart_file}));
+  }
+  const state={version:1,...(config.questionnaire_version===1?{questionnaire_version:1}:{}),...(config.notes_only?{notes_only:true,entry_ordered:entryOrdered}:{}),...(config.trade_chart_only?{trade_chart_only:true}:{}),mode:'capture_first',phase:'awaiting_notes',date,created_at:new Date().toISOString(),tradingview_released:true,ordered,image_hashes:imageHashes,sealed_file_hashes:sealedFiles};
   // Written last; a partial copy is not a ready pack.
   await fs.writeFile(path.join(packDir,'stage.json'),JSON.stringify(state,null,2),{flag:'wx'});
   if(config.questionnaire_version===1){const {prepare}=await import('./capture-review.mjs');await prepare(packDir);}
-  return {pack_dir:packDir,date,phase:state.phase,tradingview_released:true,ordered};
+  return {pack_dir:packDir,date,phase:state.phase,tradingview_released:true,ordered,...(entryOrdered?{entry_ordered:entryOrdered}:{})};
 }
 
 export function parseNotes(text,state) {
@@ -98,7 +129,7 @@ export async function resumePack(packDir,freshSnapshotPath,outputPath,notesPath=
   packDir=path.resolve(packDir);
   const [state,old,captured,fresh]=await Promise.all(['stage.json','before.json','captured-review.json'].map(file=>load(path.join(packDir,file))).concat(load(freshSnapshotPath)));
   if(state.version!==1||state.mode!=='capture_first'||state.phase!=='awaiting_notes'||state.tradingview_released!==true)throw Error('A released pending capture pack is required');
-  for(const file of ['before.json','captured-review.json','evidence.json','chart-release.json'])if(hash(await fs.readFile(path.join(packDir,file)))!==state.sealed_file_hashes?.[file])throw Error(`Sealed capture evidence changed: ${file}`);
+  for(const file of Object.keys(state.sealed_file_hashes||{}))if(hash(await fs.readFile(path.join(packDir,file)))!==state.sealed_file_hashes?.[file])throw Error(`Sealed capture evidence changed: ${file}`);
   if(isoDate(fresh.date)!==state.date||!sameIDs(old.trades,fresh.trades))throw Error('Imported day/IDs changed; coordinate a new capture window');
   for(const trade of fresh.trades){
     const original=old.trades.find(x=>x.id===trade.id);
@@ -118,20 +149,20 @@ export async function resumePack(packDir,freshSnapshotPath,outputPath,notesPath=
   for(const row of review.trades){
     const chart=captured.trades.find(x=>x.id===row.id),trade=fresh.trades.find(x=>x.id===row.id),note=notes.trades.find(x=>x.trade_id===row.id);
     Object.assign(row,{chart_reviewed:chart.chart_reviewed,chart_context:chart.chart_context,chart_annotations:chart.chart_annotations,chart_path:path.join(packDir,`trade-${row.id}.png`),rr:chart.rr,rr_evidence:chart.rr_evidence});
-    if(!note.no_note){const text=note.text.trim();if(!String(trade.notes||'').includes(`<p>${escape(text)}</p>`)&&String(trade.notes||'').trim()!==text){row.notes_append=text;row.notes_source=`User notes ${path.resolve(notesPath)}; frozen trade ${note.number} / imported ID ${row.id}`;}}
+    if(!note.no_note){const text=note.text.trim();if(appendSummary(trade.notes,text)!==String(trade.notes||'')){row.notes_append=text;row.notes_source=`User notes ${path.resolve(notesPath)}; frozen trade ${note.number} / imported ID ${row.id}`;}}
     // Catalog/groups/old tags come from the fresh snapshot, not the sealed chart review.
   }
   review.pack_source=packDir;
   review.notes_input={path:path.resolve(notesPath),sha256:hash(raw),daily:notes.daily||'',trades:notes.trades};
   await fs.mkdir(path.dirname(path.resolve(outputPath)),{recursive:true});
   await fs.writeFile(outputPath,JSON.stringify(review,null,2),{flag:'wx'});
-  return {date:state.date,trades:review.trades.map(x=>x.id),review_path:path.resolve(outputPath),tradingview_used:false,tag_review_required:true,daily_notes_pending:!!notes.daily};
+  return {date:state.date,trades:review.trades.map(x=>x.id),review_path:path.resolve(outputPath),tradingview_used:false,tag_review_required:state.notes_only!==true,daily_notes_pending:!!notes.daily};
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const [command,a,b,c,d]=process.argv.slice(2);
   try {
-    if((command==='create'||command==='create-review')&&a&&b){const config=await load(a);if(command==='create-review')config.questionnaire_version=1;console.log(JSON.stringify(await createPack(config,b),null,2));}
+    if((command==='create'||command==='create-review'||command==='create-notes')&&a&&b){const config=await load(a);delete config.questionnaire_version;config.notes_only=true;config.trade_chart_only=true;console.log(JSON.stringify(await createPack(config,b),null,2));}
     else if(command==='resume'&&a&&b&&c)console.log(JSON.stringify(await resumePack(a,b,c,d),null,2));
     else throw Error('Usage: journal-pack.mjs create config.json NEW_PACK_DIR | resume PACK_DIR FRESH_BEFORE_JSON NEW_REVIEW_JSON [NOTES_MD_OR_JSON]');
   }catch(error){console.error(error.message);process.exitCode=1;}

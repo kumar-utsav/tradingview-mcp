@@ -1,7 +1,9 @@
+import {isFuturesJournal,firstJournalFill,journalStart,journalTargetExit} from './journal-instrument.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import {appendSummary} from './capture-notes.mjs';
 
 const FIELDS = ['id','ticker','expiration','type','strike','quantity','avg_price','date','time','outcome','entry_candle','time_frame','profit_loss','transactions','notes','tags','rr','has_chart'];
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -48,11 +50,11 @@ function annotationPlan(trade) {
   let open=0,finalExit=null;const entrySide=transactions[0]?.side;
   for(const item of transactions){open+=item.side===entrySide?item.quantity:-item.quantity;if(open===0)finalExit=item;}
   const firstEntry=transactions[0];
-  const positionTool=String(trade.type).toLowerCase()==='call'?'long_position':'short_position';
+  const positionTool=(isFuturesJournal(trade)?entrySide==='BUY':String(trade.type).toLowerCase()==='call')?'long_position':'short_position';
   return {
     position_tool:positionTool,position_entity_id:'',
     first_entry_time:firstEntry?.transaction.filledTime||'',final_exit_time:finalExit?.transaction.filledTime||'',
-    position_start_rule:'stored_entry_candle',
+    position_start_rule:isFuturesJournal(trade)?'actual_first_fill_candle':'stored_entry_candle',
     position_end_rule:'final_exit_candle',
     position_target_rule:positionTool==='short_position'?'mfe_low':'mfe_high',
     position_mfe_candle_time:null,
@@ -77,21 +79,8 @@ export function reviewTemplate(snapshot,dir) {
     skipped:[]
   };
 }
-export function parsePositionRRLabel(label, compact=false) {
-  if(typeof label!=='string')throw Error('RR requires the TradingView position-tool label');
-  const token=compact?label.trim().split('\n').at(-1):label.match(/risk\s*\/\s*reward\s+ratio\s*:\s*([^\n]+)/i)?.[1];
-  if(!token || !/^\d+(?:[.,]\d+)?$/.test(token.trim()))throw Error('RR could not be read from the TradingView position-tool label');
-  const value=Number(token.trim().replace(',','.'));
-  if(!Number.isFinite(value))throw Error('Invalid position-tool RR');
-  return value;
-}
-export function positionRR(annotations) {
-  const read=annotations?.position_rr;
-  if(!read || read.entity_id!==annotations.position_entity_id || !['tradingview_position_tool_label','visual_position_tool_label'].includes(read.source))throw Error('RR requires a label read from the matched position tool');
-  const value=parsePositionRRLabel(read.label,read.compact===true);
-  if(read.value!==value)throw Error('RR read-back value must match the position-tool label');
-  return value;
-}
+export {parsePositionRRLabel,positionRR} from '../src/core/position-rr.js';
+import {positionRR} from '../src/core/position-rr.js';
 function transactionTime(value) {
   const time=Date.parse(String(value||''));
   if(!Number.isFinite(time))throw Error('Transaction needs a valid filledTime');
@@ -101,7 +90,8 @@ export function validateChartAnnotations(review,trade) {
   if(typeof review.chart_path!=='string'||!review.chart_path.trim())throw Error(`Annotated chart_path required: ${trade.id}`);
   const annotations=review.chart_annotations;
   if(!annotations||typeof annotations!=='object')throw Error(`Chart annotations required: ${trade.id}`);
-  const expectedTool=String(trade.type).toLowerCase()==='call'?'long_position':String(trade.type).toLowerCase()==='put'?'short_position':null;
+  const futures=isFuturesJournal(trade);
+  const expectedTool=futures?(firstJournalFill(trade).side==='BUY'?'long_position':'short_position'):String(trade.type).toLowerCase()==='call'?'long_position':String(trade.type).toLowerCase()==='put'?'short_position':null;
   if(!expectedTool||annotations.position_tool!==expectedTool)throw Error(`Wrong position tool: ${trade.id}`);
   if(typeof annotations.position_entity_id!=='string'||!annotations.position_entity_id.trim())throw Error(`Position drawing ID required: ${trade.id}`);
   if(annotations.view_preserved!==true)throw Error(`Original chart view must be preserved: ${trade.id}`);
@@ -124,8 +114,8 @@ export function validateChartAnnotations(review,trade) {
   const firstEntry=transactions[0];
   if(transactionTime(annotations.first_entry_time)!==firstEntry.time)throw Error(`First entry mismatch: ${trade.id}`);
   if(transactionTime(annotations.final_exit_time)!==finalExit.time)throw Error(`Final exit mismatch: ${trade.id}`);
-  if(annotations.position_start_rule!=='stored_entry_candle')throw Error(`Position tool must start on the stored entry_candle: ${trade.id}`);
-  const expectedStart = entryCandleTime(trade);
+  if(annotations.position_start_rule!==(futures?'actual_first_fill_candle':'stored_entry_candle'))throw Error(`Position tool must start on the stored entry_candle: ${trade.id}`);
+  const expectedStart = journalStart(trade,futures?null:entryCandleTime(trade));
   if (Number(annotations.position_start_candle_time)!==expectedStart) throw Error(`Position start must match stored entry_candle: ${trade.id}`);
   if (expectedStart > Math.floor(firstEntry.time/60000)*60) throw Error(`Stored entry_candle follows the first fill: ${trade.id}`);
   if(annotations.position_end_rule!=='final_exit_candle')throw Error(`Wrong position endpoint rule: ${trade.id}`);
@@ -133,7 +123,9 @@ export function validateChartAnnotations(review,trade) {
   if(!Number.isFinite(candleSeconds)||candleSeconds<=0)throw Error(`Invalid minute timeframe: ${trade.id}`);
   const expectedEnd=Math.floor(finalExit.time/1000/candleSeconds)*candleSeconds;
   if(Number(annotations.position_end_candle_time)!==expectedEnd)throw Error(`Position tool must extend to the final exit candle: ${trade.id}`);
-  const expectedTargetRule=expectedTool==='short_position'?'mfe_low':'mfe_high';
+  const exitPolicy=futures&&['final_exit_v1','farthest_exit_v2'].includes(annotations.position_policy);
+  if(exitPolicy&&(!['target','stop'].includes(annotations.exit_band)||annotations.final_exit_price!==finalExit.price))throw Error('Final exit evidence mismatch');
+  const expectedTargetRule=exitPolicy&&annotations.exit_band==='target'?(annotations.position_policy==='farthest_exit_v2'?'farthest_exit_fill':'final_exit_fill'):expectedTool==='short_position'?'mfe_low':'mfe_high';
   if(annotations.position_target_rule!==expectedTargetRule)throw Error(`Wrong position target rule: ${trade.id}`);
   const mfeTime=annotations.position_mfe_candle_time;
   const firstFillCandle=Math.floor(firstEntry.time/1000/candleSeconds)*candleSeconds;
@@ -142,9 +134,13 @@ export function validateChartAnnotations(review,trade) {
     if(!Number.isFinite(Number(annotations[key])))throw Error(`Position geometry requires ${key}: ${trade.id}`);
   }
   if(Number(annotations.position_end_candle_time)<Number(annotations.position_start_candle_time))throw Error(`Position endpoint precedes entry: ${trade.id}`);
-  if(Number(annotations.stop_distance)!==0.5)throw Error(`Position stop distance must be $0.50: ${trade.id}`);
+  const distance=exitPolicy&&annotations.exit_band==='stop'?Math.abs(firstEntry.price-finalExit.price):futures?20*annotations.position_tick_size:0.5;
+  if(futures&&(!Number.isFinite(distance)||distance<=0||Number(annotations.position_entry_price)!==firstEntry.price))throw Error('Exact futures entry and tick size required');
+  if(!Number.isFinite(Number(annotations.stop_distance))||Math.abs(Number(annotations.stop_distance)-distance)>1e-8)throw Error(`Position stop distance must be ${futures?'20 ticks':'$0.50'}: ${trade.id}`);
   const entryPrice=Number(annotations.position_entry_price),targetPrice=Number(annotations.position_target_price),stopPrice=Number(annotations.position_stop_price);
-  const expectedStop=expectedTool==='short_position'?entryPrice+0.5:entryPrice-0.5;
+  const bandPrice=annotations.exit_band==='target'&&annotations.position_policy==='farthest_exit_v2'?journalTargetExit(trade).price:finalExit.price;
+  if(exitPolicy&&(annotations.exit_band==='target'?targetPrice:stopPrice)!==bandPrice)throw Error('Position band must match selected closing fill (farthest winning exit or final exit fill)');
+  const expectedStop=expectedTool==='short_position'?entryPrice+distance:entryPrice-distance;
   if(Math.abs(stopPrice-expectedStop)>1e-9)throw Error(`Position stop is on the wrong price: ${trade.id}`);
   if(expectedTool==='short_position'&&targetPrice>entryPrice)throw Error(`Short endpoint must use the lowest favorable price: ${trade.id}`);
   if(expectedTool==='long_position'&&targetPrice<entryPrice)throw Error(`Long endpoint must use the highest favorable price: ${trade.id}`);
@@ -155,6 +151,7 @@ export function validateChartAnnotations(review,trade) {
     const index=Number(marker.transaction_index),expected=transactions.find(item=>item.index===index);
     if(!Number.isSafeInteger(index)||seen.has(index)||!expected)throw Error(`Invalid transaction marker index: ${trade.id}`);
     seen.add(index);
+    if(futures&&(marker.anchor_rule!=='actual_fill_price'||marker.anchor_price!==expected.price||marker.anchor_time!==Math.floor(expected.time/1000/candleSeconds)*candleSeconds))throw Error('Exact futures fill anchor required');
     if(typeof marker.entity_id!=='string'||!marker.entity_id.trim())throw Error(`Transaction marker drawing ID required: ${trade.id}/${index}`);
     if(String(marker.side||'').toUpperCase()!==expected.side||Number(marker.quantity)!==expected.quantity||Number(marker.price)!==expected.price||transactionTime(marker.filled_time)!==expected.time)throw Error(`Transaction marker mismatch: ${trade.id}/${index}`);
     const text=String(marker.text||'').toUpperCase();
@@ -171,7 +168,7 @@ function client(base,request) {
 }
 const decode = s => Buffer.from(s.replace(/^data:[^,]+,/,''),'base64');
 const png = b => b.length>8 && b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
-export async function snapshotDay(date,dir,{base,request=fetch}={}) {
+export async function snapshotDay(date,dir,{base,request=fetch,includeCatalog=true}={}) {
   const api=client(base,request);
   date=isoDate(date);
   // The backend exposes a daily-note collection for reads; the dated route is PUT-only.
@@ -181,7 +178,7 @@ export async function snapshotDay(date,dir,{base,request=fetch}={}) {
     if(matches.length>1)throw Error(`Duplicate daily notes for ${date}`);
     return matches[0]||null;
   });
-  const [all,tags,groups,daily_note]=await Promise.all([api('/journal/'),api('/tags/?page_type=journal'),api('/tags/groups?page_type=journal'),dailyRead]);
+  const [all,tags,groups,daily_note]=await Promise.all([api('/journal/'),includeCatalog?api('/tags/?page_type=journal'):[],includeCatalog?api('/tags/groups?page_type=journal'):[],dailyRead]);
   const trades=planDay(all,date); const chart_hashes={};
   await fs.mkdir(path.dirname(path.resolve(dir)),{recursive:true});
   // An existing directory may contain recovery images: never reuse it.
@@ -225,7 +222,7 @@ export async function applyReview(manifest,snapshot,{base,request=fetch,apply=fa
   const ids=[...rows,...skipped].map(t=>t.id);
   if(new Set(ids).size!==ids.length||canonical([...ids].sort())!==canonical(snapshot.trades.map(t=>t.id).sort()))throw Error('Every imported trade must be reviewed or explicitly skipped');
   if(skipped.some(t=>!t.reason?.trim()))throw Error('Skipped trade needs reason');
-  const [current,tags,groups]=await Promise.all(['/journal/','/tags/?page_type=journal','/tags/groups?page_type=journal'].map(p=>api(p)));
+  const [current,tags,groups]=await Promise.all([api('/journal/'),preserveLegacyTags?[]:api('/tags/?page_type=journal'),preserveLegacyTags?[]:api('/tags/groups?page_type=journal')]);
   if(canonical(planDay(current,date).map(t=>t.id).sort())!==canonical(snapshot.trades.map(t=>t.id).sort()))throw Error('Day trade list changed; take a new snapshot');
   const liveChartHashes=new Map(await Promise.all(rows.map(async row=>{
     const old=snapshot.trades.find(t=>t.id===row.id);
@@ -256,7 +253,7 @@ export async function applyReview(manifest,snapshot,{base,request=fetch,apply=fa
     if(image&&hash(image)!==oldHash)updates.push(['chart',image.toString('base64')]);
     if(!sameTags(old.tags||[],row.tags))updates.push(['tags',row.tags]);
     if('rr' in row&&row.rr!==old.rr)updates.push(['rr',row.rr]);
-    if(row.notes_append){const escaped=row.notes_append.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');updates.push(['notes',`${old.notes||''}<p>${escaped}</p>`]);}
+    if(row.notes_append){const value=appendSummary(old.notes,row.notes_append);if(value!==String(old.notes||''))updates.push(['notes',value]);}
     prepared.push({row,old,oldHash,updates,chartHash:image?hash(image):oldHash});
   }
   const verified=[];
@@ -284,7 +281,7 @@ export async function applyReview(manifest,snapshot,{base,request=fetch,apply=fa
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const [command,arg,directory]=process.argv.slice(2);const base=(process.env.TRADING_API_URL||'http://100.125.89.9:5555').replace(/\/$/,'');
-  if(command==='snapshot')console.log(JSON.stringify(await snapshotDay(arg,directory,{base}),null,2));
-  else if(command==='review') {const m=JSON.parse(await fs.readFile(arg,'utf8'));const s=JSON.parse(await fs.readFile(m.snapshot_path,'utf8'));console.log(JSON.stringify(await applyReview(m,s,{base,apply:process.argv.includes('--apply')}),null,2));}
+  if(command==='snapshot')console.log(JSON.stringify(await snapshotDay(arg,directory,{base,includeCatalog:!process.argv.includes('--notes-only')}),null,2));
+  else if(command==='review') {const m=JSON.parse(await fs.readFile(arg,'utf8'));const s=JSON.parse(await fs.readFile(m.snapshot_path,'utf8'));console.log(JSON.stringify(await applyReview(m,s,{base,apply:process.argv.includes('--apply'),preserveLegacyTags:process.argv.includes('--notes-only')}),null,2));}
   else throw Error('Usage: journal-capture.mjs snapshot YYYY-MM-DD new-run-directory | review manifest.json [--apply]');
 }

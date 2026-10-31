@@ -10,6 +10,7 @@ function fixture() {
   const note={drawing_id:'n1',status:'assigned',text:'Held',trade_source_id:trade.source_id};
   const deps={
     evaluate:async expression=>{
+      if(expression.includes('_createMiddleLabel'))return {label:'2.91',compact:true};
       if(expression.includes('backtest-frozen-evidence'))return expression.includes('if (true)')
         ? {...identity,...(changed?{symbol:'QQQ'}:{})} : {identity,drawings:[{id:'n1',properties:{text:'1: Held'}}],bars:[]};
       if(expression.includes('backtest-day-inventory'))return [{drawing_id:'p1',source_id:trade.source_id}];
@@ -61,6 +62,8 @@ describe('Frozen backtest capture',()=>{
     assert.equal(f.snapshots.recovery.payload.screenshot,undefined);
     assert.equal(f.snapshots.recovery.evidence.drawings[0].properties.text,'1: Held');
     assert.equal(b.payload.trades[0].notes,'Held');
+    assert.equal(b.payload.trades[0].rr,2.91);
+    assert.equal(b.payload.trades[0].position_rr.entity_id,'p1');
     assert.equal(b.payload.daily_note,'Daily note');
     assert.equal(b.payload.trade_screenshots.length,1);
   });

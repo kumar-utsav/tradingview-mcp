@@ -1,3 +1,4 @@
+import {readPositionRR} from './position-rr.js';
 import { createHash, randomUUID } from "node:crypto";
 import {
   evaluate as defaultEvaluate,
@@ -1391,6 +1392,8 @@ export async function captureIsolatedTradeScreenshots(trades, inventory, deps, d
     const seenImages = new Set([hiddenImage]);
     if (started.visible_positions > 1 && dayScreenshot) seenImages.add(dayScreenshot);
     for (const target of targets) {
+      try {
+      await deps.beforeTrade?.(target);
       let base64;
       for (let attempt = 0; attempt < 3; attempt++) {
         const isolated = await deps.evaluateAsync(
@@ -1411,6 +1414,7 @@ export async function captureIsolatedTradeScreenshots(trades, inventory, deps, d
         source_id: target.source_id,
         screenshot: { mime_type: "image/png", base64 },
       });
+      } finally { await deps.afterTrade?.(target); }
     }
   } catch (error) {
     captureError = error;
@@ -1677,6 +1681,12 @@ export async function freezeBacktestDay({ date, persist, notesMode = 'chart', qu
   if (JSON.stringify(evidence.identity) !== identity) throw new Error('Chart changed during the annotated capture; keep it unchanged and retry');
   await unchanged();
   const day = await readBacktestDay(date, deps, readChartNotes);
+  for (const trade of day.trades) {
+    const drawing = day.inventory.find(item => item.source_id === trade.source_id);
+    if (!drawing) throw Error('Matched position tool required for RR');
+    trade.position_rr = await readPositionRR(drawing.drawing_id, {evaluateChart:deps.evaluate});
+    trade.rr = trade.position_rr.value;
+  }
   const graphics = {};
   for (const [name, read] of [['labels',deps.getPineLabels],['boxes',deps.getPineBoxes],['lines',deps.getPineLines]]) {
     try { graphics[name] = await read({max_labels:50}); }

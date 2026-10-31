@@ -186,39 +186,52 @@ Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines')
 
 ## Personal capture workflows
 
-When the user says "capture backtest day" (including dictation variants), use
-`skills/capture-backtest-day/SKILL.md` and complete the chart, notes, checklist,
-tag verification in `workflows/capture-backtest-day.md`. The
-default is capture-first: capture all trades/screenshots/evidence locally,
-restore and release TradingView, then wait for numbered notes in chat without
-server writes. Do not extract or delete chart commentary as notes. On
-continuation, assemble notes with the saved trade-number/source-ID mapping,
-save and verify from that pack without accessing TradingView again. Require
-notes or explicit NO NOTE for every captured trade; never guess missing notes.
-Preserve existing pending legacy captures in their original mode. The
-user authorized this tagging workflow on 2026-09-21. The manually reviewed
-reference is `tag-audit-2026-09-21/`; current catalog definitions take precedence.
+When the user says "capture backtest" or "capture backtest day" (including dictation
+variants), use `skills/capture-backtest-day/SKILL.md` and
+`workflows/capture-backtest-day.md`. Capture trades/screenshots first, restore and
+release TradingView, collect concise numbered notes, save and verify through
+APIs. User update 2026-10-25 restores automatic selection of supported existing
+backtest checklist items from notes, fills and frozen charts. Reuse broad filter
+categories such as Poor execution; explain the specific cause in notes. Propose
+new catalog items only when existing categories do not fit, and discuss before
+creation. Preserve unrelated tags. Questionnaires and research remain excluded.
+Reconcile actual futures fills flat-to-flat, then save each opening fill/add as
+a separately reviewable entry with its own position-tool image, linked by position
+identity and summary. Count only entry rows. Use dedicated replay ingestion;
+never publish replay fills through drawing ingestion. After chart release,
+resume only from the saved pack, without TradingView access. Notes have no
+headings; use short precise bullets. Optional daily summaries must follow the
+user's notes. Preserve raw dictation and recovery.
 
-When the user says "capture journal" or "capture journal day", use
-`skills/capture-journal/SKILL.md` and process all already-imported journal trades
-for the visible chart day under `workflows/capture-journal.md`. The user selected
-all imported trades for that day on 2026-09-23. Preserve imported IDs, fills,
-P/L, outcomes and existing notes. By default, annotate/screenshot each trade
-once, cache native RR and dated evidence in a Desktop capture pack, remove its
-temporary marks, and restore/verify the user's chart before releasing TradingView.
-Pause for numbered notes in chat or the pack file, without journal writes. On
-continuation, process the saved pack and fresh server catalog, save and verify
-charts/notes/tags/RR/resources **without TradingView access**. Do not restore the
-old chart after release. Changed trades require a coordinated new capture window.
-Use the legacy retained-chart notes mode only when explicitly requested or when
-resuming an already-existing pending capture. The dated reference is
-`journal-workflow-2026-09-23/`; load the current catalog for each capture.
+When the user says "capture journal" or "capture journal day", follow
+`skills/capture-journal/SKILL.md` and `workflows/capture-journal.md`. Capture imported
+trades and their individual entry views/screenshots with native RR and journal
+annotation rules, restore/release TradingView, then collect only user-supplied
+notes. Summarize concise heading-free trade/entry notes and supported daily notes.
+User update 2026-10-26 applies the same existing-catalog checklist behavior as
+backtest capture: automatically select supported existing items from notes,
+imported fills and frozen charts; reuse broad categories and keep specifics in
+notes. Propose a generic reusable item only when no useful category fits, with
+the choice to add it or keep the detail in notes only; create only with explicit
+agreement. Follow the checklist-only API/read-back procedure in the workflow.
+Explicit notes-only/no-checklist requests skip selection. Questionnaires and
+research remain excluded. Preserve unrelated tags, broker IDs/fills/P&L/outcomes
+and daily resources. Entry
+views are attachments to imported rows, so totals are counted once. Save and
+verify from the sealed pack without TradingView access. No historical capture
+is selected by a request to edit the workflow.
 
 These two personal skills are linked from `/Users/utsav/.agents/skills/`, so
 requests can originate in any local Codex project. Resolve their relative
 commands and run artifacts from `/Users/utsav/Projects/tradingview-mcp`.
 
 ## Temporary work and cleanup
+
+Never create capture folders or files on the Desktop. New journal/backtest run
+files belong under `/Users/utsav/Projects/tradingview-mcp/captures/`
+in unique `journal/YYYY-MM-DD-run-id` or `backtest/YYYY-MM-DD-run-id` directories.
+The `/captures/` directory is Git-ignored; do not force-add capture artifacts.
+Retain unfinished packs for recovery and delete completed packs after API verification.
 
 Keep disposable audits, preview servers, ad hoc validation scripts, debug
 screenshots, and trial captures in the operating system's temporary directory,
@@ -234,13 +247,17 @@ Review changes individually during cleanup; never reset the checkout or discard
 useful work merely to make Git status clean. Cleanup does not authorize a
 commit, push, or deployment.
 
-## Structured capture review v1
+## Notes-only capture
 
-New captures default to `questionnaire_version: 1` following user pilot and
-rollout approval on 2026-10-16. Run the read-only readiness check before chart
-access; use `journal-pack.mjs create-review` or `backtest-freeze.mjs freeze-review`. Follow
-`workflows/capture-review.md` for both personal capture workflows. Its conditional
-questions and optional exception bullets supersede mandatory prose notes for
-that version only. Existing pending packs retain their original mode. The version-1 instructions supersede legacy mandatory-note rules for new packs. Do not deploy, migrate live catalogs or
-backfill history as part of capture. Shared structured fields own their generated
-tags; preserve capture-first and zero chart access after release.
+New journal and backtest captures use the notes-only workflows above. User update
+2026-10-19 removes automatic questionnaires, checklist analysis/generation and
+research comparisons from both. Preserve pending pack evidence and existing
+manual selections; explicit notes-only continuation can bypass an old questionnaire
+without rewriting sealed files. Never discard supplied dictation. Save concise
+summaries in trade/entry notes and supported daily notes, and verify via APIs.
+
+Backtest exception, 2026-10-25: automatically review and select existing checklist
+items as described above and in workflows/capture-backtest-day.md. Explicit
+notes-only/no-checklist requests skip selection. Journal update, 2026-10-26:
+apply the same behavior through workflows/capture-journal.md, including proposing
+missing generic items before creation and preserving unrelated selections.

@@ -10,6 +10,7 @@ const tradingRoot=process.env.TRADING_PROJECT_ROOT||path.resolve(root,'../tradin
 const require=createRequire(import.meta.url);
 export const shared=require(path.join(tradingRoot,'frontend/src/utils/captureReview.js'));
 const {hash}=require(path.join(tradingRoot,'backend/utils/captureReview.js'));
+import {cleanupCompletedPack} from './capture-cleanup.mjs';
 const load=async p=>JSON.parse(await fs.readFile(p,'utf8'));
 const exists=p=>fs.stat(p).then(()=>true,()=>false);
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -159,6 +160,7 @@ export async function publish(pack,{base=process.env.TRADING_API_URL||process.en
   await fs.writeFile(path.join(pack,'structured-save-result.json'),JSON.stringify(completion,null,2));
   await fs.writeFile(path.join(pack,'structured-complete.json'),JSON.stringify(completion,null,2));
   completed=true;
+  await cleanupCompletedPack(pack);
   return completion;
  }catch(error){await fs.writeFile(path.join(pack,'structured-save-failure.json'),JSON.stringify({error:error.message,attempt,progress},null,2));throw error;}
  finally{if(completed)await fs.rm(attempt,{recursive:true,force:true});}
@@ -168,6 +170,7 @@ export async function verifyVisible(pack,verificationPath){
  if(result.status!=='api_verified_ui_pending'||proof.date!==result.date||proof.tradingview_used!==false||proof.backup_verified!==true||!proof.filter_statistics_verified||!Array.isArray(proof.trades))throw Error('API result, visible filter/statistic and backup verification required');
  for(const t of result.trades){const p=proof.trades.find(p=>p.trade_id===t.trade_id);if(!p||p.revision!==t.revision||p.checklist_verified!==true||p.tags_verified!==true||!p.evidence)throw Error('Visible selection verification missing: '+t.trade_id);}
  await write(path.join(pack,'structured-complete.json'),{...result,status:'complete',verification:proof});
+ await cleanupCompletedPack(pack);
  return {status:'complete',trades:result.trades,tradingview_used:false};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){const [command,pack,input]=process.argv.slice(2);try{console.log(JSON.stringify(await (command==='preflight'?preflight(pack):command==='prepare'?prepare(pack):command==='assemble'?assemble(pack,input):command==='publish'?publish(pack):command==='verify-visible'?verifyVisible(pack,input):Promise.reject(Error('Usage: capture-review.mjs preflight journal|backtest | prepare PACK | assemble PACK ANSWERS_JSON | publish PACK | verify-visible PACK PROOF_JSON'))),null,2));}catch(e){console.error(e.message);process.exitCode=1;}}

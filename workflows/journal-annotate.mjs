@@ -1,5 +1,7 @@
+import {isFuturesJournal, journalChartSymbol, journalTargetExit} from './journal-instrument.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {assertCapturePath} from './capture-paths.mjs';
 import { pathToFileURL } from 'node:url';
 import { evaluate } from '../src/connection.js';
 import { getState, getVisibleRange, setSymbol } from '../src/core/chart.js';
@@ -11,7 +13,7 @@ import { reviewTemplate, entryCandleTime, positionRR, parsePositionRRLabel } fro
 
 const CHART = 'window.TradingViewApi._activeChartWidgetWV.value()';
 const STOP = 0.5;
-const FILL_FONT_SIZE = 16;
+const FILL_FONT_SIZE = 12;
 const round = n => Math.round(n * 1e8) / 1e8;
 const bucket = (milliseconds, seconds) => Math.floor(milliseconds / 1000 / seconds) * seconds;
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -20,7 +22,9 @@ export function planAnnotation(trade, bars, resolution) {
   const seconds = Number(resolution) * 60;
   if (!Number.isSafeInteger(seconds) || seconds <= 0) throw Error(`Trade ${trade.id}: minute chart resolution required`);
   const kind = String(trade.type).toLowerCase();
-  if (!['call', 'put'].includes(kind)) throw Error(`Trade ${trade.id}: Call or Put required`);
+  const futures=isFuturesJournal(trade),tickSize=trade.instrument?.tick_size;
+  if(futures&&(!Number.isFinite(tickSize)||tickSize<=0))throw Error('Verified futures tick size required');
+  if (!futures&&!['call', 'put'].includes(kind)) throw Error(`Trade ${trade.id}: Call or Put required`);
   const fills = (trade.transactions || []).map((fill, index) => ({
     index, side: String(fill.side || '').toUpperCase(), quantity: Number(fill.quantity),
     price: Number(fill.price), filled_time: fill.filledTime,
@@ -36,28 +40,41 @@ export function planAnnotation(trade, bars, resolution) {
   if (open !== 0 || !final) throw Error(`Trade ${trade.id}: final flat exit is missing`);
   const firstTime = bucket(fills[0].millis, seconds);
   const lastTime = bucket(final.millis, seconds);
-  const entryTime = entryCandleTime(trade);
+  const entryTime = futures?firstTime:entryCandleTime(trade);
   if (entryTime > firstTime || entryTime % seconds !== 0) throw Error(`Trade ${trade.id}: stored entry_candle is after the first fill or is not aligned to the chart timeframe`);
   const byTime = new Map(bars.map(bar => [Number(bar.time), bar]));
   const entry = byTime.get(entryTime);
   if (!entry || !byTime.has(lastTime)) throw Error(`Trade ${trade.id}: entry or final exit candle is not loaded`);
   const window = bars.filter(bar => bar.time >= firstTime && bar.time <= lastTime).sort((a, b) => a.time - b.time);
   if (window.length !== (lastTime - firstTime) / seconds + 1) throw Error(`Trade ${trade.id}: candle history has a gap during the trade`);
-  const short = kind === 'put';
+  const short = futures?fills[0].side==='SELL':kind === 'put';
   let mfe = window[0];
   for (const bar of window.slice(1)) if (short ? bar.low < mfe.low : bar.high > mfe.high) mfe = bar;
-  const entryPrice = Number(short ? entry.low : entry.high);
-  const target = Number(short ? mfe.low : mfe.high);
-  const stop = round(entryPrice + (short ? STOP : -STOP));
+  const entryPrice = futures?fills[0].price:Number(short ? entry.low : entry.high);
+  let target = Number(short ? mfe.low : mfe.high);
+  let stopDistance=futures?20*tickSize:STOP;
+  let stop = round(entryPrice + (short ? stopDistance : -stopDistance));
+  let exitBand=null;
+  if(futures){
+    // Entry views carry their own allocated fills, not the parent outcome.
+    const cash=fills.reduce((sum,f)=>sum+(f.side==='SELL'?1:-1)*f.quantity*f.price,0);
+    const outcome=trade.journal_trade_id?Math.sign(cash):String(trade.outcome).toLowerCase()==='win'?1:String(trade.outcome).toLowerCase()==='loss'?-1:Math.sign(cash);
+    exitBand=outcome<0?'stop':'target';
+    const bandExit=exitBand==='target'?journalTargetExit(trade):final;
+    const move=(bandExit.price-entryPrice)*(short?-1:1);
+    if((exitBand==='target'&&move<0)||(exitBand==='stop'&&move>0))throw Error(`Trade ${trade.id}: selected exit is on the wrong side for its outcome`);
+    if(exitBand==='target')target=bandExit.price;
+    else {stop=final.price;stopDistance=Math.abs(stop-entryPrice);}
+  }
   if (![entryPrice, target, stop].every(Number.isFinite)) throw Error(`Trade ${trade.id}: invalid candle prices`);
   return {
-    id: trade.id, symbol: trade.ticker, resolution: String(resolution),
+    id: trade.id, futures, position_policy:futures?'farthest_exit_v2':undefined, exit_band:exitBand, final_exit_price:final.price, symbol: trade.ticker, resolution: String(resolution),
     position_tool: short ? 'short_position' : 'long_position',
     first_entry_time: fills[0].filled_time, final_exit_time: final.filled_time,
     start: { time: entryTime, price: entryPrice },
     end: { time: lastTime, price: target },
-    mfe: { time: mfe.time, price: target },
-    stop_price: stop, stop_distance: STOP,
+    mfe: { time: mfe.time, price: Number(short ? mfe.low : mfe.high) },
+    stop_price: stop, stop_distance: stopDistance,
     fills: fills.map(fill => {
       const time = bucket(fill.millis, seconds);
       if (!byTime.has(time)) throw Error(`Trade ${trade.id}: fill candle ${fill.filled_time} is not loaded`);
@@ -68,31 +85,8 @@ export function planAnnotation(trade, bars, resolution) {
   };
 }
 
-// Ask TradingView's own label formatter for its value. A detached receiver captures
-// the text without replacing renderer data or changing the user's drawing.
-export async function readPositionRR(entityId, {evaluateChart=evaluate}={}) {
-  const read=await evaluateChart(`(function() {
-    var source=${CHART}._chartWidget.model().dataSourceForId(${JSON.stringify(entityId)});
-    if(!source)throw Error('Position drawing is unavailable');
-    var properties=source.properties().childs();
-    if(!properties.infoBlocks.childs().riskRewardRatio.childs().visible.value())throw Error('Position-tool RR label is hidden');
-    var views=Array.from(source._paneViews.values()).flat();
-    var view=views.find(function(v){return typeof v._createMiddleLabel==='function'});
-    if(!view)throw Error('TradingView position-tool label reader is unavailable');
-    var reader=Object.create(view);
-    // Newer renderers access pixel points before the first paint. The detached
-    // label reader needs only a harmless position; prices still come from source.
-    reader._points=[{x:0,y:0},{x:100,y:0}];
-    reader._addCenterLabel=function(renderer,label,data){return data.txt};
-    var label=view._createMiddleLabel.call(reader,{
-      entryPrice:source.entryPrice(),profitPrice:source.profitPrice(),stopPrice:source.stopPrice(),
-      currentPrice:source.entryPrice(),pl:0,left:0,edge:100,isClosed:false
-    },null,source.ownerSource().symbolSource().symbolInfo());
-    return {label:label,compact:properties.compact.value()};
-  })()`);
-  return {entity_id:entityId,source:'tradingview_position_tool_label',...read,
-    value:parsePositionRRLabel(read.label,read.compact)};
-}
+export {readPositionRR} from '../src/core/position-rr.js';
+import {readPositionRR} from '../src/core/position-rr.js';
 
 export async function preservePositionAnchors(entityId, plan, {evaluateChart=evaluate}={}) {
   // Creation quantizes adjusted historical prices to the display tick. The
@@ -102,7 +96,7 @@ export async function preservePositionAnchors(entityId, plan, {evaluateChart=eva
   await evaluateChart(`window.TradingViewApi._activeChartWidgetWV.value().getShapeById(${JSON.stringify(entityId)}).setPoints(${JSON.stringify(points)})`);
 }
 
-async function chartGeometry() {
+export async function chartGeometry() {
   return evaluate(`(function() {
     var chart=${CHART}, model=chart._chartWidget.model(), series=model.mainSeries();
     var bars=series.bars(), ts=model.timeScale(), ps=series.priceScale(), first=series.firstValue();
@@ -156,7 +150,14 @@ export function segmentIntersectsBox(start, end, box) {
 
 // Lay out the labels in screen pixels so a change in price scale does not make
 // them enormous or push them over candles. Each label stays close to its fill.
-export function placeLabels(plan, geometry) {
+export function leadersIntersect(a,b,c,d) {
+  const cross=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+  const on=(p,q,r)=>Math.abs(cross(p,q,r))<1e-7&&r.x>=Math.min(p.x,q.x)-1e-7&&r.x<=Math.max(p.x,q.x)+1e-7&&r.y>=Math.min(p.y,q.y)-1e-7&&r.y<=Math.max(p.y,q.y)+1e-7;
+  const u=cross(a,b,c),v=cross(a,b,d),w=cross(c,d,a),z=cross(c,d,b);
+  return (u*v<0&&w*z<0)||on(a,b,c)||on(a,b,d)||on(c,d,a)||on(c,d,b);
+}
+
+export function placeLabels(plan, geometry, {maxVisits=50000,searches,fontSize=FILL_FONT_SIZE,minHorizontalDistance=18}={}) {
   const visible = geometry.bars.filter(b => b.x >= 0 && b.x <= geometry.width);
   if (!visible.length) throw Error(`Trade ${plan.id}: no visible candles`);
   const gaps = visible.slice(1).map((bar, i) => Math.abs(bar.x - visible[i].x)).filter(n => n > 0).sort((a, b) => a - b);
@@ -165,33 +166,33 @@ export function placeLabels(plan, geometry) {
   // Wicks are thin; treating their entire high/low span as a padded body can
   // block a leader at its starting point beside a neighboring tall wick.
   const candleBoxes = visible.flatMap(bar => [
-    {left:bar.x-1.5,right:bar.x+1.5,top:bar.highY-2,bottom:bar.lowY+2},
-    {left:bar.x-candleHalfWidth,right:bar.x+candleHalfWidth,
+    {time:bar.time,left:bar.x-1.5,right:bar.x+1.5,top:bar.highY-2,bottom:bar.lowY+2},
+    {time:bar.time,left:bar.x-candleHalfWidth,right:bar.x+candleHalfWidth,
       top:Math.min(bar.openY ?? bar.highY,bar.closeY ?? bar.lowY)-1,
       bottom:Math.max(bar.openY ?? bar.highY,bar.closeY ?? bar.lowY)+1},
   ]);
   // Reserve all fill anchors before placing the first note, including later fills.
   const anchorClearance = plan.fills.flatMap(fill => {
     const bar = visible.find(item => item.time === fill.time);
-    return bar ? [bar.highY-8,bar.lowY+8].map(y => ({
+    return bar ? (Number.isFinite(fill.anchor_y)?[fill.anchor_y]:[bar.highY-8,bar.lowY+8]).map(y => ({
       time:fill.time,left:bar.x-14,right:bar.x+14,top:y-14,bottom:y+14,
     })) : [];
   });
   function candidates(fill, distances, reach) {
     const anchor = geometry.bars.find(b => b.time === fill.time);
     if (!anchor || anchor.x < 8 || anchor.x > geometry.width - 8) throw Error(`Trade ${plan.id}: fill ${fill.transaction_index} is outside the visible chart`);
-    const width = Math.ceil(fill.text.length * FILL_FONT_SIZE * 0.6 + 16);
-    const height = FILL_FONT_SIZE + 10;
+    const width = Math.ceil(fill.text.length * fontSize * 0.6 + 16);
+    const height = fontSize + 10;
     const found = [];
     for (const sign of [1, -1]) {
       // Opposite fills in one candle need separate, visible wick anchors.
       const opposite=plan.fills.some(other=>other.time===fill.time&&['BUY','SELL'].includes(other.side)&&other.side!==fill.side);
-      if(['BUY','SELL'].includes(fill.side)&&opposite&&sign!==(fill.side==='BUY'?1:-1))continue;
-      const anchorY = sign === 1 ? anchor.lowY + 8 : anchor.highY - 8;
+      if(!Number.isFinite(fill.anchor_y)&&['BUY','SELL'].includes(fill.side)&&opposite&&sign!==(fill.side==='BUY'?1:-1))continue;
+      const anchorY = Number.isFinite(fill.anchor_y)?fill.anchor_y:(sign === 1 ? anchor.lowY + 8 : anchor.highY - 8);
       for (const dy of distances) {
         for (const near of visible) {
           const dx = near.x - anchor.x;
-          if (Math.abs(dx) < 40 || Math.abs(dx) > reach) continue;
+          if (Math.abs(dx) < minHorizontalDistance || Math.abs(dx) > reach) continue;
           const y = anchorY + sign * dy;
           const leaderStart = {x:anchor.x,y:anchorY}, leaderEnd = {x:near.x,y};
           // TradingView text starts at its point and extends right/down; it is
@@ -200,7 +201,7 @@ export function placeLabels(plan, geometry) {
           if (box.left < 10 || box.right > geometry.width - 10 || box.top < 14 || box.bottom > geometry.height - 24) continue;
           if (anchorClearance.some(other => intersects(box, other))) continue;
           if (visible.some(bar => bar.x >= box.left - 5 && bar.x <= box.right + 5 && bar.highY <= box.bottom + 5 && bar.lowY >= box.top - 5)) continue;
-          if (candleBoxes.some(obstacle => segmentIntersectsBox(leaderStart, leaderEnd, obstacle))) continue;
+          if (candleBoxes.some(obstacle => !(Number.isFinite(fill.anchor_y)&&obstacle.time===fill.time) && segmentIntersectsBox(leaderStart, leaderEnd, obstacle))) continue;
           // Neighboring candles can be less than 14px apart at the user's zoom.
           // Keep the full 14px exclusion for note boxes, but protect the actual
           // connector endpoints with a smaller radius so adjacent anchors do not
@@ -219,7 +220,7 @@ export function placeLabels(plan, geometry) {
   }
   // Choose the entire cluster together: a greedy early note can occupy the only
   // safe lane for a later fill, even though another complete layout exists.
-  for(const search of [{distances:[70,95,120,145,170],reach:190},
+  for(const search of searches || [{distances:[25,45,65,85,105,125,145,165],reach:180},
     {distances:[45,70,95,120,145,170,195,220],reach:250},
     {distances:[95,145,195,245,295,345,395,445,495],reach:400}]) {
     const options=plan.fills.map(fill=>candidates(fill,search.distances,search.reach));
@@ -229,16 +230,23 @@ export function placeLabels(plan, geometry) {
     let visits=0;
     function choose(depth) {
       if(depth===order.length)return true;
-      if(++visits>50000)return false;
-      const index=order[depth].index;
-      for(const note of options[index]) {
-        if(chosen.some(other=>intersects(note.bounds,other.bounds)||
+      if(++visits>maxVisits)return false;
+      const fits=note=>!chosen.some(other=>leadersIntersect(note.anchor,note.label,other.anchor,other.label)||intersects(note.bounds,other.bounds)||
           segmentIntersectsBox(note.anchor,note.label,other.bounds)||
-          segmentIntersectsBox(other.anchor,other.label,note.bounds)))continue;
+          segmentIntersectsBox(other.anchor,other.label,note.bounds));
+      let index=order[depth].index, available;
+      if(searches){
+        for(let i=0;i<options.length;i++)if(!selected[i]){
+          const candidates=options[i].filter(fits);
+          if(!candidates.length)return false;
+          if(!available||candidates.length<available.length){index=i;available=candidates;}
+        }
+      }else available=options[index].filter(fits);
+      for(const note of available) {
         selected[index]=note;chosen.push(note);
         if(choose(depth+1))return true;
-        chosen.pop();
-        if(visits>50000)break;
+        chosen.pop();selected[index]=undefined;
+        if(visits>maxVisits)break;
       }
       return false;
     }
@@ -247,14 +255,14 @@ export function placeLabels(plan, geometry) {
   throw Error(`Trade ${plan.id}: no jointly clear label layout at the preserved zoom`);
 }
 
-async function pixelPrices(placements) {
+export async function pixelPrices(placements) {
   const values = placements.flatMap(p => [p.anchor.y, p.label.y]);
   const prices = await evaluate(`(function() {
     var s=${CHART}._chartWidget.model().mainSeries(), p=s.priceScale(), first=s.firstValue();
     return ${JSON.stringify(values)}.map(function(y){return p.coordinateToPrice(y,first)});
   })()`);
   placements.forEach((p, i) => {
-    p.anchor.price = round(prices[2 * i]);
+    p.anchor.price = Number.isFinite(p.anchor_y)?p.price:round(prices[2 * i]);
     p.label.price = round(prices[2 * i + 1]);
   });
 }
@@ -272,7 +280,7 @@ export function positionToolLevels(plan, tickSize) {
   // supported by the drawing API; preserve the actual price instead of rounding.
   const stopLevel = round(Math.abs(plan.start.price - plan.stop_price) / tickSize);
   const profitLevel = round(Math.abs(plan.end.price - plan.start.price) / tickSize);
-  if (Math.abs(stopLevel * tickSize - STOP) > 1e-6 ||
+  if (Math.abs(stopLevel * tickSize - plan.stop_distance) > 1e-6 ||
       Math.abs(profitLevel * tickSize - Math.abs(plan.end.price - plan.start.price)) > 1e-6) {
     throw Error(`Trade ${plan.id}: position levels cannot be represented at the underlying tick size`);
   }
@@ -295,12 +303,16 @@ export function validatePositionPrices(plan, drawing, tickSize) {
   return { stop, target };
 }
 
-async function renderTrade(plan, outputDir, seenImages) {
+export async function renderTrade(plan, outputDir, seenImages) {
   const created = [];
   try {
     const geometry = await chartGeometry();
     const entryBar = geometry.bars.find(bar => bar.time === plan.start.time);
     if (!entryBar || entryBar.x < 0 || entryBar.x > geometry.width) throw Error(`Trade ${plan.id}: stored entry_candle is outside the preserved view`);
+    if(plan.futures){
+      const ys=await evaluate(`(()=>{var s=${CHART}._chartWidget.model().mainSeries();return ${JSON.stringify(plan.fills.map(f=>f.price))}.map(p=>s.priceScale().priceToCoordinate(p,s.firstValue()));})()`);
+      plan.fills.forEach((f,i)=>{if(!Number.isFinite(ys[i]))throw Error('Exact fill coordinate unavailable');f.anchor_y=ys[i];});
+    }
     const placements = placeLabels(plan, geometry);
     await pixelPrices(placements);
     const tickSize = await evaluate(`(function() {
@@ -323,6 +335,7 @@ async function renderTrade(plan, outputDir, seenImages) {
       const leader=await drawShape({shape:'trend_line',point:{time:p.anchor.time,price:p.anchor.price},point2:{time:p.label.time,price:p.label.price},overrides:JSON.stringify({linecolor:color,linewidth:1})});
       if (!leader.entity_id) throw Error(`Trade ${plan.id}: leader line has no ID`);
       created.push(leader.entity_id);
+      if(plan.futures)await evaluate(`window.TradingViewApi._activeChartWidgetWV.value().getShapeById(${JSON.stringify(leader.entity_id)}).setPoints(${JSON.stringify([{time:p.anchor.time,price:p.anchor.price},{time:p.label.time,price:p.label.price}])})`);
       await assertDrawing(leader.entity_id,'trend_line',{time:p.anchor.time,price:p.anchor.price});
       const label=await drawShape({shape:'text',point:{time:p.label.time,price:p.label.price},text:p.text,
         overrides:JSON.stringify({color:'#ffffff',backgroundColor:color,fillBackground:true,backgroundTransparency:0,drawBorder:false,wordWrap:false,fontsize:FILL_FONT_SIZE,bold:false})});
@@ -333,7 +346,7 @@ async function renderTrade(plan, outputDir, seenImages) {
       await setVisualOrder({entity_id:label.entity_id,action:'bring_to_front'});
       markers.push({transaction_index:p.transaction_index,entity_id:label.entity_id,leader_entity_id:leader.entity_id,
         side:p.side,quantity:p.quantity,price:p.price,filled_time:p.filled_time,text:p.text,
-        candle_time:p.time,label_time:p.label.time,label_price:p.label.price});
+        anchor_rule:plan.futures?'actual_fill_price':'outside_wick',anchor_time:p.anchor.time,anchor_price:p.anchor.price,candle_time:p.time,label_time:p.label.time,label_price:p.label.price});
     }
     const shot=await captureJournalTradeImage({tradeId:plan.id,positionId:position.entity_id,annotationIds:created,seenImages});
     const destination=path.join(outputDir,`trade-${plan.id}.png`);
@@ -341,8 +354,9 @@ async function renderTrade(plan, outputDir, seenImages) {
     const view=(await getVisibleRange()).visible_range;
     return {id:plan.id,chart_path:destination,position_entity_id:position.entity_id,position_start_candle_time:plan.start.time,
       position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,
+      position_policy:plan.position_policy,exit_band:plan.exit_band,final_exit_price:plan.final_exit_price,
       position_entry_price:plan.start.price,position_target_price:plan.end.price,
-      position_stop_price:plan.stop_price,stop_distance:STOP,position_rr:positionRRRead,position_tick_size:tickSize,
+      position_stop_price:plan.stop_price,stop_distance:plan.stop_distance,position_rr:positionRRRead,position_tick_size:tickSize,
       position_stop_ticks:levels.stopLevel,position_profit_ticks:levels.profitLevel,
       resolution:plan.resolution,visible_range:view,transaction_markers:markers,
       screenshot_checks:shot.screenshot_checks,layout_automated:true,visual_review_required:true};
@@ -359,6 +373,8 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
     const result=completed.get(row.id),a=row.chart_annotations;
     Object.assign(a,{
       position_entity_id:result.position_entity_id,
+      position_policy:result.position_policy,exit_band:result.exit_band,final_exit_price:result.final_exit_price,
+      position_target_rule:result.exit_band==='target'?(result.position_policy==='farthest_exit_v2'?'farthest_exit_fill':'final_exit_fill'):a.position_target_rule,
       position_rr:result.position_rr,
       position_tick_size:result.position_tick_size,
       position_start_candle_time:result.position_start_candle_time,
@@ -379,6 +395,7 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
       if (!found) throw Error(`Trade ${row.id}: missing fill marker ${marker.transaction_index}`);
       marker.entity_id=found.entity_id;
       marker.leader_entity_id=found.leader_entity_id;
+      if(isFuturesJournal(snapshot.trades.find(t=>t.id===row.id)))Object.assign(marker,{anchor_rule:found.anchor_rule,anchor_time:found.anchor_time,anchor_price:found.anchor_price});
     }
     row.chart_path=result.chart_path;
     row.rr=positionRR(a);
@@ -390,6 +407,7 @@ export function prefillReview(snapshot, outputDir, annotated, skipped, snapshotP
 }
 
 export async function annotateSnapshot(snapshotPath, { outputDir=path.dirname(path.resolve(snapshotPath)) }={}) {
+  outputDir=assertCapturePath(outputDir);
   const snapshot=JSON.parse(await fs.readFile(snapshotPath,'utf8'));
   const trades=snapshot.trades || [];
   if (!trades.length) return {date:snapshot.date,annotated:[],skipped:[]};
@@ -420,15 +438,16 @@ export async function annotateSnapshot(snapshotPath, { outputDir=path.dirname(pa
   try {
     for (const trade of trades) {
       try {
-        const ticker=String(trade.ticker).toUpperCase();
-        const symbol=ticker.includes(':')?ticker:ticker==='SPY'?'AMEX:SPY':ticker==='QQQ'?'NASDAQ:QQQ':ticker;
+        const symbol=journalChartSymbol(trade.ticker);
         const state=await getState();
         if (state.symbol!==symbol) await setSymbol({symbol});
         await restoreExactRange(range);
         await sleep(350);
         if(!candleCache.has(symbol)) candleCache.set(symbol,(await getOhlcv({count:2500})).bars);
         const candles=candleCache.get(symbol);
-        const plan=planAnnotation(trade,candles,resolutions[0]);
+        const instrument=await evaluate(`(()=>{var i=${CHART}._chartWidget.model().mainSeries().symbolInfo();return {type:i.type,tick_size:i.minmov/i.pricescale};})()`);
+        if(isFuturesJournal(trade)&&instrument.type!=='futures')throw Error('Futures chart metadata required');
+        const plan=planAnnotation({...trade,instrument},candles,resolutions[0]);
         annotated.push(await renderTrade(plan,outputDir,seenImages));
       } catch(error) {
         skipped.push({id:trade.id,reason:error.message});

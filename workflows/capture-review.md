@@ -1,20 +1,23 @@
-# Structured journal and backtest capture, version 1
+# Legacy structured capture review, version 1
+
+User update, 2026-10-19: neither routine journal nor routine backtest capture
+uses this legacy questionnaire or research workflow.
+Follow capture-journal.md and capture-backtest-day.md for notes-only capture.
+This reference remains only for already-sealed legacy structured reviews or
+separately requested manual structured-review work. Do not route new captures here.
 
 This reference is shared by both skills. The executable question registry and research policy live in `/Users/utsav/Projects/trading/frontend/src/utils/captureReview.js`; do not maintain separate question lists. It exports 30 conditional topics, five prompts, fields, answer states, generated tag definitions, calculations and the query contract.
 
-## Rollout and compatibility
+## Legacy compatibility only
 
-The user approved the read-only pilot and rollout on 2026-10-16. Version 1 is enabled for future captures in both workflows. Existing packs use their recorded mode; never convert them silently or backfill history. For new Journal packs use `journal-pack.mjs create-review CONFIG NEW_PACK`; for new Backtest packs use `backtest-freeze.mjs freeze-review DATE NEW_PACK`. Batch captures may mark unsupported user decisions unknown instead of requesting dictation when the user explicitly waives questions. Catalog installation and deployment remain separate from routine capture.
-
-For an explicitly selected v1 pack, check readiness **before any chart access**:
-
-```sh
-node --env-file=.env workflows/capture-review.mjs preflight journal
-# Use preflight backtest for that workflow.
-```
-
-Require `ready:true`. The check is read-only and verifies the reviewed schema and complete versioned catalog. Missing dependencies leave TradingView free and do not authorize a deployment, catalog recreation or a silent legacy fallback. `journal-pack.mjs create-review CONFIG NEW_PACK` is an explicit v1 convenience command; `create` keeps its compatibility behavior. Use version 1 for new captures. Compatibility commands and existing pending packs retain their legacy behavior.
-
+The following sections describe the former structured mode for already-sealed
+packs or separately requested structured-review work. They are not defaults for
+new captures. New journal/backtest captures use their maintained notes-only
+workflows; do not create questionnaires. Existing-catalog checkbox review uses
+the checklist-only procedure in each maintained capture workflow, not this
+legacy structured-review path.
+Explicit notes-only continuation of an old pack preserves its sealed evidence
+and bypasses this structured save path.
 
 ## 1. Secure evidence and release the chart
 

@@ -1,310 +1,264 @@
 # Capture backtest day
 
-User update, 2026-10-17: omit the emotions prompt in backtest reviews and mark
-those answers skipped. Regular journal reviews retain the emotions prompt.
-The four backtest prompts are entry, risk, management and exceptions; this
-supersedes five-prompt references below for backtest only.
+New run files belong under `/Users/utsav/Projects/tradingview-mcp/captures/backtest/YYYY-MM-DD-run-id/`.
+Never create capture folders or files on the Desktop. Keep pending packs here
+for recovery; put disposable audits/scripts in the OS temporary directory.
 
-**New captures use structured review v1**, approved on 2026-10-16. Before
-accessing TradingView, run `node --env-file=.env workflows/capture-review.mjs preflight backtest`
-and require `ready:true`. Follow [capture-review.md](capture-review.md) for the
-conditional questions, optional exception bullets and save flow. Use
-`backtest-freeze.mjs freeze-review DATE NEW_PACK` to select v1 explicitly.
-It supersedes the prose-note handoff and legacy tagging below; chart safeguards
-remain unchanged. Existing pending packs keep their recorded version.
+## Replay capture from transactions — user update 2026-10-22
 
-## Futures Replay Trading: fills and grouped trades
+New replay captures generate their own position tools from the paused replay
+filled-order ledger. Manual position drawings are not required and are never
+used to infer execution facts. This section supersedes older manual-tool
+capture instructions below for new packs; sealed old packs remain
+unchanged and resumable.
 
-When the chart is futures and the user executed Replay Trading orders, use
-`freeze-review` (automatically routes futures) or explicitly:
+- Each opening fill, including each add, is a separate backtest trade with its
+  own screenshot and FIFO-allocated partial/final exits. Keep shared position
+  identity and summary; do not save an additional parent trade or duplicate P/L.
+  Journal-style annotation rules apply independently to each entry, using its
+  own outcome and exits. Preserve reconciled lots, costs, ticks and ingestion IDs.
+- Use the shared journal annotation planner/renderer: anchor at the actual first
+  fill price/candle, extend through the final closing candle, use the farthest
+  favorable actual closing fill as the winning target, and the final closing
+  fill as the losing stop. Winners keep the 20-tick display stop; losers keep
+  the in-window MFE target. Zero-result trades use the final-exit target.
+- Display conventions are not historical planned risk or realized R. Verify
+  instrument tick size and read back exact bands and TradingView native RR.
+- Show all fills with 12-point white BUY/SELL labels on green/red backgrounds
+  and nearby diagonal leaders, using exact fill candles/prices. Reuse journal
+  isolation, redraw, cleanup and visual acceptance rules. Preserve user drawings.
+- Release TradingView after capture/restoration; collect only supplied notes,
+  preserve existing checklist selections, save through dedicated replay-fill
+  ingestion and independently verify images, native RR, notes and execution facts.
+  Never publish these records through manual-drawing ingestion.
+
+Replay transactions come from TradingView; journal transactions come from the
+trading app. Both use the same generated chart annotations. No replay advance,
+new trading, live recapture, publication or migration is implied by editing this
+workflow. Legacy manual-drawing capture is only an explicitly requested fallback.
+
+
+User update, 2026-10-25: capture trades/screenshots, collect concise notes,
+automatically select supported existing checklist categories, then save and
+verify. Reuse broad categories for filtering and put the precise reason in
+notes. Do not create new catalog items without discussion and explicit approval.
+Questionnaires and research comparisons remain excluded. An explicit notes-only
+or no-checklist request skips checklist selection. Journal capture uses the same checklist behavior as of 2026-10-26.
+
+## 1. Capture and release TradingView
+
+Run the read-only backend readiness check before chart access:
+`node --input-type=module --env-file=.env -e "import {preflightNotes} from './workflows/capture-notes.mjs'; console.log(await preflightNotes('backtest'))"`.
+Require ready:true. This checks service compatibility only; do not analyze or
+write a checklist. Identify the active tab, symbol, timeframe and Pacific replay
+date once. Replay must be paused. Ask the user to leave the chart unchanged for
+the brief exclusive capture window.
+
+For futures Replay Trading, run:
 
 ```sh
 node --env-file=.env workflows/backtest-freeze.mjs freeze-replay-review YYYY-MM-DD NEW_PACK
 ```
 
-This starts with a **local capture phase**. It reads the active chart's
-`_replayApi.replayStrategyFacade().reportData()` and `filledOrders`, not
-`replay_status.position`/`realized_pnl` (which can be null despite a populated
-Replay Trading report), broker orders, or Strategy Tester results. Replay must
-be paused. Never advance, stop, restart, clear or trade to obtain data.
+This compatibility command secures actual filled orders, matched FIFO lots,
+flat-to-flat positions, then one entry record per opening fill (including adds),
+loaded candles, drawing mapping, Pine evidence, the original
+screenshot and isolated trade images. New notes-only packs do not create questionnaires. Never advance, stop, clear or trade in replay to obtain
+evidence. Related entries retain a shared position_source_id and position_summary;
+only entry rows contribute to totals. Partial exits are allocated FIFO to their
+opening fill. Capture each entry with its own uniquely mapped long/short tool,
+not just the first tool of the whole position. Require
+closed, fully reconciled trades; preserve open positions, truncation and other
+dates as coverage limits. Drawing geometry cannot prove historical initial risk,
+stop changes or realized R. Require unique drawing matches and visible complete
+entry-to-exit intervals; fail rather than invent evidence.
 
-Capture three separate layers:
-
-1. One review trade per flat-to-flat position episode, with signed position
-   after each fill; additions and partial exits stay inside that trade. Reversals
-   split closing/opening quantities while retaining the original order ID.
-2. Every unique filled order with source ID, timestamp, sequence, side, size,
-   price, type and comment. Same-time fills retain replay sequence, not UI sort.
-3. Every matched entry/exit lot and its recorded P/L/commission, independently
-   reconciled to FIFO fills, symbol point value, position and report totals.
-
-Group the complete available report before selecting the Pacific entry date.
-Preserve other-date coverage, open positions and report truncation as limits;
-do not infer a flat start at midnight. This implementation completes captures
-only for closed positions, same account/symbol currency and fully reconcilable
-FIFO reports. Unsupported reports retain recovery and fail without success.
-
-The helper secures `replay-raw.json`, the original full screenshot,
-`recovery.json`, loaded chart evidence and per-study Pine graphics. It maps each
-trade to one unique position drawing by direction and time overlap, records
-that mapping as derived evidence, and uses the existing screenshot isolation
-and restoration checks. Drawings need to span the first actual fill; ambiguous,
-missing or reused drawings fail rather than fabricate a match. The complete
-entry-to-exit interval must already be visible. After viewing all isolated
-images, record a local visual-review receipt and release TradingView. From that
-point continue exclusively from the pack.
-
-`ledger.json`, `report.md` and `frozen.json` preserve actual fills, weighted
-prices, contracts entered, peak size, matched lots and gross/net replay P/L.
-The checksum-bound ready marker seals evidence and screenshots. One campaign
-counts once in win/loss statistics, regardless of matched-row count. Native
-planned RR and drawing geometry remain separate: position-tool distances use
-the symbol tick size, not a universal `/100`. Current geometry cannot prove
-initial stops, stop changes, intended targets or initial cash risk. Realized R
-stays null without documented initial cash risk. Do not infer emotions or
-management intention from order comments. Zero recorded commission is the
-replay configuration, not proof of realistic trading costs.
-
-Collect the same five shared prompts in the saved `review-input.json`; preserve
-dictation and supplied intent. Local `capture-review.mjs assemble` works with
-this sealed pack after the user finishes. The SPY fixed-stop research comparison
-is unavailable for futures until a validated instrument policy exists.
-
-**Publish only after backend capability verification.** The registry must report
-`ready:true` and `capabilities.replay_fills:true` after migration
-`019_replay_backtest_executions.sql` is installed. Run the normal structured
-`assemble` and `publish` commands; the publisher takes the app recovery snapshot,
-sends the sealed source report and isolated screenshots to
-`/ingestion/backtest/replay`, verifies actual fills/lots/P&L by source ID, then
-saves and independently reads back the structured reviews. It uses the original
-idempotency key and persists exact retry requests. Retries return unchanged
-records; changed execution facts require an explicit correction instead of
-overwriting history. No chart access occurs after release.
-
-The backend independently derives flat-to-flat episodes from the source report,
-stores immutable `replay_execution` JSON with instrument metadata, fills, matched
-lots and raw source orders, and keeps planned stop/target/RR unset. App records
-use Long/Short direction. The Transactions tab shows actual exposure changes and
-expandable matched lots. Dedicated replay P/L, fill-count and peak-size filters
-never apply option multipliers or invent facts for legacy drawings. Verify saved notes, checklist tags, screenshots and execution facts through the trading MCP/APIs. Do not perform trading-app screen checks, CSV backup exports or restore tests during routine capture (user update, 2026-10-18).
-
-If capability verification fails, report “local evidence secured; app save
-pending deployment,” never “saved/complete.” Legacy ingestion rejects replay
-packs. Do not turn fills into journal broker records, Call/Put records, prose
-notes or unrelated tags. Deployment and live database migration are separate
-from capture; never improvise them during a routine capture.
-
-## Legacy compatibility instructions and unchanged chart safeguards
-
-
-## Stage 1: capture all trades, then wait for chat notes
-
-Read TradingView state once to identify the chart date, ticker and timeframe.
-Ask the user to keep the chart unchanged only for the brief capture phase. Do
-not start app snapshots or tag review yet. From this project,
-freeze into a new, unique audit directory:
+For drawing-based backtests, run:
 
 ```sh
-node workflows/backtest-freeze.mjs freeze-chat YYYY-MM-DD backtest-captures/YYYY-MM-DD-HHMMSS
+node workflows/backtest-freeze.mjs freeze-chat YYYY-MM-DD NEW_PACK
 ```
 
-The helper captures `annotated-start.png` first, then freezes structural drawing
-geometry, loaded OHLCV and Pine graphics in `recovery.json`. It captures `day.png`
-and isolated `position-N.png` images, restores position visibility, and durably
-writes `frozen.json`, `chart-evidence.json`, `pending-notes.json` and the
-checksum-bound `chart-ready.json`. It does not extract, assign or delete chart
-commentary; captured notes start empty. Existing commentary may be visible in
-images but must not be read as user notes. Structural zone/level labels remain
-usable evidence. A failed phase must not release the chart or claim success.
-Report skipped positions rather than silently declaring all trades captured.
+Use a unique durable directory under `/Users/utsav/Projects/tradingview-mcp/captures/backtest/`. Do not extract chart
+commentary as user notes. Preserve structural drawings and original chart state.
+Screenshot isolation must show only the mapped position tool; never substitute
+a full-day or duplicate frame. View annotated-start.png, day.png and every
+position-N.png. Verify entry, relevant price action and zones are visible. Record
+a local visual-review.json receipt. Require chart_released:true and successful
+restoration before telling the user TradingView is free. Stage one makes no app
+writes. Report skipped positions or capture failures; retain recovery files.
 
-Isolation must fail closed: verify position visibility, wait for actual redraw,
-and compare each image with a tools-hidden control, earlier trade images, and
-the original day image when it had multiple visible tools. The helper retries
-repeated frames at most three times, restores visibility, and stops without
-sealing a successful pack if checks fail. Never substitute the day image.
+## 2. Collect concise notes from the saved pack
 
-Before announcing release, actually view every local `position-N.png`. Each must
-show only its mapped Long/Short tool, with entry, relevant price action and zones
-visible. Distinct bytes and API visibility checks alone are not visual proof.
-If any image still shows multiple tools, the wrong trade or no tool, report the
-failed capture and retain recovery files; do not publish, accept it as a fallback,
-or claim successful capture. A retry after release requires a new coordinated
-chart window; do not touch the user's new chart work.
+Show fixed numbered trade mapping and Pacific entry/exit times. Ask for numbered
+notes or explicit NO NOTE, then wait. Ordinary dictation is sufficient; do not
+require entry/risk/management questionnaires or emotion questions. Preserve raw
+dictation. Summarize each trade accurately in a few concise bullets or sentences,
+with no headings. Do not add chart-derived intentions or unreported exit reasons.
+If requested, summarize supported day-level observations briefly, without headings.
+Preserve earlier notes and resources. Resolve ambiguous trade mapping without
+guessing. A complete note set and finish/continue instruction authorizes saving.
 
-After a successful result with `chart_released: true` and this image check, send:
-"All captured trade evidence is secured—you can move on in TradingView now.
-Nothing has been saved to the server yet. Send your numbered notes below."
-Present the fixed numbered list from `pending-notes.json`, including direction,
-ticker and entry/exit times (use the frozen Pacific times; do not reinterpret
-already formatted candle times).
-Ask for `1: ...`, `2: ...`, optional `DAY: ...`, and explicit `N: NO NOTE` for any
-trade intentionally without notes. Then END THE TURN and wait. Do not perform
-ingestion or tag writes before receiving complete notes. There is no promise of
-zero delay: all required live-chart evidence must finish before release.
+After release, use only the pack and trading APIs. Never read/mutate TradingView,
+restore its old view, invoke Undo, or recapture the user's new chart. Missing
+frozen evidence stays unknown. New evidence needs a separately coordinated window.
 
-## Stage 2: assemble chat notes and save from the pack
+Write notes-input.json with date, user_finished:true, raw_dictation, trades
+containing number/source_id/text (or no_note:true), and optional daily text.
+Keep exact frozen source IDs. Never overwrite a sealed input on retry; later
+corrections require an amendment and fresh baseline.
 
-On continuation, locate the matching pending run and confirm its date and
-numbered mapping. If multiple runs could match, ask which one. New chart work
-does not invalidate a captured pack. An explicit new capture uses a new pack;
-never overwrite an earlier pending run. Preserve partial chat notes and ask only
-for missing or ambiguous numbers. Silence is not NO NOTE. Do not substitute
-chart commentary or invent note text. A note-only follow-up resumes the pending
-capture; it does not authorize capturing today's newly visible chart.
+## 3. Save and independently verify
 
-From release onward, NEVER read/mutate the live chart, move replay, restore the old
-view, or invoke Undo. Do not call `capture_backtest_day` to publish or retry: it
-would capture the user's next chart. Once all captured trades have explicit
-notes or NO NOTE, create a local `notes-input.json` using the exact source IDs
-from `pending-notes.json` and the user's verbatim text:
-
-```json
-{
-  "date": "YYYY-MM-DD",
-  "trades": [
-    {"number": 1, "source_id": "exact-frozen-source-id", "text": "User's notes"},
-    {"number": 2, "source_id": "another-frozen-source-id", "no_note": true}
-  ],
-  "daily": "Optional DAY note from chat"
-}
-```
-
-Do not invent a daily note when none was supplied. The assembler requires exact
-date, unique mapped numbers, full coverage, and nonempty notes or explicit
-`no_note: true`. It seals `chat-notes.json`, `assembled.json` and
-`notes-ready.json` without accessing TradingView or the server. Only notes and
-the daily note may change; screenshots, trade facts and the retry key stay fixed.
-Assemble only after notes are complete. Sealed files are immutable; preserve
-them on errors and inspect a partial seal before retrying, never overwrite it
-or silently recapture. Before publication, any requested note revision needs
-an explicitly coordinated replacement assembly; never reuse a published key
-with changed notes.
-
-Take the app's pre-ingestion recovery snapshot in the SAME frozen directory,
-then publish the assembled bundle:
+For replay-fill packs:
 
 ```sh
-node workflows/backtest-freeze.mjs assemble /absolute/run/directory /absolute/run/directory/notes-input.json
-node workflows/verify-tags.mjs snapshot YYYY-MM-DD /absolute/run/directory
-node workflows/backtest-freeze.mjs publish /absolute/run/directory
+node --env-file=.env workflows/backtest-notes.mjs PACK PACK/notes-input.json
 ```
 
-The snapshot batches records, live catalog/groups, daily notes/resources, and
-bounded parallel recovery-image reads into `before.json`; do not publish unless
-it succeeds. Publishing validates the ready marker, bundle checksum and snapshot
-date and complete sealed chat notes, then sends saved images/notes with the
-original idempotency key. Retain all
-recovery files on failure and retry publishing the SAME bundle/key, not a new
-chart capture. Rejected/duplicate trades can produce
-`note_recovery_required`; report this and retain the chat notes locally.
-Restoration after release requires explicit user direction, never automatic
-Undo over new chart work. Existing pending legacy `freeze` chart-notes runs may
-finish in their original mode; all new runs use `freeze-chat`. Resolve skipped
-positions, ambiguous notes and
-duplicates without guessing. Next create the post-capture review manifest:
+The helper validates sealed evidence, requires ready:true, replay_fills:true and
+replay_entries:true for per-entry packs,
+publishes the dedicated replay ingestion endpoint using the original idempotency
+key, saves plain trade/daily notes, preserves existing tags/resources, and reads
+back exact notes, screenshot bytes, actual transactions, matched lots and P/L.
+It never calls the capture-review save endpoint or creates checklist items.
+The notes-only baseline and sealed input remain in the pack for recovery/retry.
 
-```sh
-node workflows/verify-tags.mjs prepare YYYY-MM-DD /absolute/run/directory
-```
+After the final API read-back succeeds, a completed pack under
+`/Users/utsav/Projects/tradingview-mcp/captures/` (or a legacy Desktop pack) is deleted automatically. The trading app database is
+the system of record; incomplete or failed packs remain on disk for recovery.
 
-Use `review-context.json` for a compact review packet: dated trades, notes,
-resources, every active checklist group's full tag meanings and selection mode,
-and any saved legacy tags. Keep the complete catalog in `current.json` as the
-source of truth. View each saved image individually; a compact packet is not a
-substitute for chart inspection. Use `review.template.json`; do not refetch the
-catalog, full record list, or chart state unless something changes. Inspect saved
-evidence first, using only the frozen chart evidence after release. This
-workflow covers all dated records, including unchanged trades. Invocation permits
-its capture/tag updates, not broker orders, commits, or deployment.
+For drawing packs, use backtest-freeze.mjs assemble with mapped notes and optional
+daily text, then the existing scoped snapshot and publish commands. Do not run
+verify-tags prepare/review/apply. Independently read back source-to-record mapping,
+images, exact notes and preserved tags/resources. Do not report complete on HTTP
+success alone. Retain recovery and retry the same pack/key after a failure.
 
-## Evidence review
+Do not search/attach YouTube resources, perform app screen checks, export CSV
+backups, run restore tests, deploy or migrate. Preserve completed records in the
+trading app; clean disposable local audits after verification.
+Report verified trade count and notes saved, plus any actual unresolved limits.
 
-Actually view `annotated-start.png`, `day.png`, each `position-N.png`, and every
-saved app trade image; read every supplied chat trade note and daily note, and
-structural chart labels. Do not read chart commentary as trade/daily notes.
-Downloads are not inspection. Match each record to entry time and drawing.
-Charts must show enough pre-entry history, entry, zones, and relevant levels. A
-1m image cannot prove a 2m trigger. If an image is absent, retry
-`GET /backtest/:id/image`; the MCP missing-image flag was incorrect in the
-2026-09-21 reference run.
 
-Use `chart-evidence.json` for frozen Pine boxes/lines/labels, original manual
-drawing metadata and bars. Bars are arrays of Unix seconds, open, high, low,
-close, volume, bounded to 5,000 loaded bars from the target day and latest loaded
-earlier date. `previous_loaded_date` is not proof of a complete previous session;
-check `bars_truncated`, `history_note`, and unavailable graphics. Missing history,
-hidden studies, absent timeframes and cross-market evidence stay unknown. Never
-use today's levels or the user's new chart for historical trades. If further
-live evidence is essential, ask for a separate targeted capture; do not silently
-reacquire the chart after release.
+## 4. Review and save existing checklist selections
 
-Use current catalog meanings, descriptions, and selection modes—not keywords or
-an arbitrary tag count. `BnR` shorthand alone proves no required evidence item.
-Review every active checklist group with supported
-selection(s) or an explicit unknown/not-applicable reason. Record evidence for
-each selected tag. Preserve corrections and flag conflicts; never silently
-replace the manually reviewed baseline.
+Unless the user explicitly requests no checklist, review all active groups in
+the live backtest catalog using supplied notes, reconciled executions and already
+inspected frozen charts. Select only supported existing items. Prefer reusable
+categories over a new item for each variation: use `Poor execution` for orders
+left unchanged after new candles, and state the exact order-management failure
+in notes. A losing result alone does not establish poor execution. Do not infer
+unreported emotions, intent, historical stops or an add's setup from its parent.
+Preserve unrelated selections and resolve contradictions with the user's notes.
+Suggest a new item only if the catalog has no useful fit; never create one until
+the user agrees. Completion of the notes authorizes saving supported selections.
 
-Apply these reviewed invariants:
+Before running the notes publisher, retain a scoped selection plan with evidence
+and fixed source IDs in an OS-temporary task directory; the notes publisher deletes
+the verified pack. Retain this plan on checklist failure. Use published IDs and
+API records thereafter; never return to TradingView. Read the live tag/group
+catalog, each mapped trade and `GET /backtest/:id/capture-review` before saving.
+Do not use legacy `PUT tags` or the old verify-tags apply path: protected checklist
+keys require the capture-review checkbox API, which can return 409 on legacy writes.
 
-- Setup validity is independent of P/L: a valid loss and invalid winner are both
-  possible. Invalid requires a specific issue; otherwise use unclear.
-- Continuation requires established directional structure; reversal requires a
-  failure/change of control. Primary location is the one thesis-driving zone.
-- Confluence requires the entry candle touching an active level/zone. Nearby
-  obstacles, indicator pivot boxes, SPY images, or profit do not prove manual
-  confluence, SPX alignment, displacement, or setup quality. Attribute unverified
-  SPX statements to notes.
-- Live displacement means an independent candle closed wholly beyond the entire
-  zone before retest. Weak displacement can coexist with a valid close.
-- Pullback/retest needs leave-and-return; a wick alone proves none of failure,
-  hold, or trigger confirmation. Do not use future-confirmed pivots.
-- Determine market regime pre-entry; later action cannot rewrite it. Record
-  opposing momentum, obstacle room, congestion, and premature entry from evidence.
-- Attempt count/reentry is per same zone and thesis. Hypothetical reentries and
-  later “worked” behavior are not the actual setup or maintained outcome.
-- Zone origin/tests, trigger mode, HTF/cross-market alignment each need their own
-  evidence. Count visits, not overlapping candles; empty groups are not negatives.
-- Known reference-image limits remain evidence limits: records 44-45 have menu
-  overlays; many session labels are hidden. Retain supported user tags rather
-  than claiming unseen pixel evidence.
+Use `PUT /backtest/:id/capture-review` with `checklist_only:true`, a stable
+`request_id`, and the freshly read `expected_revision`, `evidence_fingerprint`
+and `trade_fingerprint`. Preserve the existing document; if absent, use the
+frontend checkbox document shape (version 1, pack_id, source_id, blankAnswers,
+empty references/observations/exceptions). Only update `answers.setup` and
+`answers.confluences` for supported seeded choices; put selected custom keys in
+`checklist_tags`. Read the owning frontend/backend implementation if its schema
+has changed. Do not populate questionnaires, attach evidence for research, change
+detailed review answers, or overwrite notes through this checkbox operation.
+On a revision conflict, reread and reconcile; do not force an overwrite.
 
-## Save, verify, and finish
+Independently read back exact checklist selections, unchanged notes, RR and
+execution facts for every mapped entry. Report completion only after both notes
+publication and checklist verification pass. Remove temporary plans after success;
+retain failure recovery. A pending catalog proposal does not block the capture.
 
-Complete `review.template.json` as `review.json`. Keep `expected_tags` and
-`expected_notes` unchanged, set `chart_reviewed` only after inspection, fill every
-active `group_review`, and supply concrete evidence for every final tag.
-If the captured day has no records, report it and stop instead of inventing a
-manifest.
 
-```sh
-node workflows/verify-tags.mjs validate /absolute/run/review.json /absolute/run/current.json
-node workflows/verify-tags.mjs /absolute/run/review.json --apply
-```
+## Explicit conversion of an existing grouped capture
 
-Validate the plan locally first, using the fresh prepared snapshot; this avoids
-four redundant network reads from the old live dry-run. Offline validation
-reports `live_verified: false` and must never be presented as a save or current
-server verification. Apply still reloads live records/catalog, validates the
-whole plan, rechecks each changed trade immediately before writing, and reads
-exact notes/tags back independently. The legacy live dry-run remains available
-by omitting `validate` and `--apply`. The helper rejects stale notes/tags, unknown/duplicate keys,
-single-select conflicts, contradictory ranges, invalid-without-issue, and
-incomplete group review. It writes only `tags`, rechecks for concurrent edits,
-then independently reads exact tags and notes back. Save command outputs in the
-run directory automatically; HTTP success alone is not verification. Serialize
-chart changes, writes, and concurrent-edit checks; parallelize independent
-read-only checks only.
+Only on the user's request, use the saved parent execution ledger and a separately
+coordinated capture of missing entry tools. Preserve the old sealed pack. Create
+an amendment with expected_execution/notes/tags for each selected parent and an
+exact source-ID mapping of child notes and isolated images. The app helper
+`backend/scripts/split_replay_entries.js` converts the original row into the first
+entry and inserts only its adds, inside one transaction. It preserves original
+execution/notes in the first entry's provenance, shares position identity/totals,
+retains existing checklist selections on the original record, and refuses
+concurrent changes. Existing multi-entry structured reviews require a coordinated
+amendment rather than silently copying whole-position selections onto each add.
+Never duplicate the parent alongside its entries. Verify every resulting image,
+note, entry/exit allocation, fee and net P/L through APIs. Preserve daily notes.
+Use the confirmed commission correction when screenshot recapture reports different
+simulation costs; preserve both source snapshots and document the discrepancy.
 
-## Resources and completion
+## Required position-tool RR
 
-Do not search for, verify, or attach videos from YouTube channels during capture.
-The frozen publisher performs no automatic video lookup. Do not invoke legacy
-capture helpers that automatically look up videos; publish the frozen bundle.
-Preserve existing daily resources unchanged; do not clear them or send an empty
-resources list. Missing videos and skipped video searches do not block completion.
+Every captured trade and entry must retain the exact RR displayed by its uniquely
+mapped TradingView long/short position tool. Read the native label during stage
+one, before chart release, and store the drawing ID, label, compact flag, numeric
+value and source as evidence. Refresh the read after tool changes. Copy that
+numeric value into the saved Details `rr` and independently read it back during
+stage two. Zero is valid; blank or unreadable RR prevents completion. Never
+substitute a ratio calculated from fills, P/L or tool geometry. This is displayed
+tool RR, not verified historical initial risk or realized R. Preserve sealed
+older packs; missing native evidence requires a coordinated amendment, never
+silent recapture after chart release.
 
-Report trade count, verified charts/notes/tags and specific unresolved chart
-evidence. API base defaults to `http://100.125.89.9:5555`; set `TRADING_API_URL`
-if live verification finds a different endpoint.
+## Actual captured ticks — non-option trades only
+
+Capture actual entry-to-exit ticks for non-option trades, using verified instrument
+tick size and direction-aware, FIFO-matched execution fills. Weight partial-exit
+moves by their allocated quantities: sum(quantity × signed price move / tick size)
+divided by total closed quantity. This is the price move per contract; retain
+contract-ticks separately, never multiply the displayed move by position size.
+Preserve each exit lot's ticks, prices and quantity as evidence. Keep losses
+negative and breakeven zero; fractional weighted averages are valid. Adds have
+separate entry metrics; position totals use every matched lot once.
+
+Replay capture seals `tick_capture` in each entry's execution evidence and saves
+an explicit actual-move line in trade notes, independently verified on read-back.
+Do not use tool targets, MFE, RR, commission-adjusted P/L or dollar multipliers to
+infer actual ticks. Without actual underlying/instrument fills and verified tick
+size, leave actual ticks unavailable with a reason; drawing geometry is insufficient.
+Option journal trades are explicitly excluded: add no tick metric or placeholder
+entry for them. Futures journal tools use the separately specified 20-tick policy;
+do not substitute the option annotation policy. Do not backfill or
+rewrite older sealed captures automatically.
+
+## Exact futures fill annotations
+
+For futures, anchor every BUY/SELL callout leader at the actual fill price on its
+actual chart candle (bucket fill time to the chart resolution). Do not move the
+anchor to a candle high/low or infer a price from the position tool. Text stays
+in nearby whitespace: `BUY|SELL quantity @ $price`, white 16-point text on green
+or red. A short diagonal leader may cross its own fill candle to reach the exact
+price; keep neighboring candles, other anchors and label text clear. Preserve
+separate fills even within the same candle. Per-entry captures use only that
+entry's FIFO-allocated quantities and exits.
+
+Read back exact anchor time/price and label text before screenshots. Inspect all
+PNGs before release; failed placement remains incomplete. Remove only generated
+annotations in finally, verify removal and original chart restoration, and keep
+annotation receipts in the sealed pack. Replay capture uses
+`futures-fill-annotations.mjs` through per-trade isolation hooks. Option journal
+annotations retain their current wick-based anchoring because option premium
+fills are not underlying chart prices. Futures journal tools use the 20-tick stop policy below; never apply the
+option $0.50 stop policy to futures.
+
+## Futures journal stop — user update 2026-10-20
+
+Use a fixed 20-tick display stop for futures journal long/short tools. Read and
+verify tick size from the actual futures chart metadata; stop distance is
+20 × tick size (MES: 5 points). Long stops are below actual opening fill price;
+short stops are above it. Start the tool on the actual first-fill candle at its
+exact fill price, including each add's independent entry view. Extend through
+the final allocated exit and retain the in-window MFE target. Read native tool
+RR after final geometry. Label every fill at its actual price/candle. Preserve
+option journal conventions, imported fills, P/L and actual order stops. This is
+an annotation/RR convention, not proof of the historical stop or realized R.
+Backtest tools retain their existing user-drawn stop/target; this default applies
+to generated futures journal tools.

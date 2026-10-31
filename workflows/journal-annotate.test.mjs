@@ -4,6 +4,14 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { planAnnotation, placeLabels, prefillReview, positionToolLevels, validatePositionPrices, segmentIntersectsBox, preservePositionAnchors } from './journal-annotate.mjs';
 import { captureJournalTradeImage, removeJournalAnnotations } from './journal-screenshot.mjs';
+import {journalChartSymbol} from './journal-instrument.mjs';
+
+test('MES broker contracts use the continuous chart without changing other instruments',()=>{
+  for(const ticker of ['MES','MESZ6','MESH27','MESZ2026','CME_MINI:MESU2027','MES1!','MES2!','/MESZ6'])
+    assert.equal(journalChartSymbol(ticker),'CME_MINI:MES1!');
+  for(const ticker of ['ESZ6','MNQZ6','MESA','NASDAQ:AAPL'])assert.equal(journalChartSymbol(ticker),ticker);
+  assert.equal(journalChartSymbol('SPY'),'AMEX:SPY');
+});
 
 const at = minute => new Date(Date.parse('2026-09-24T14:00:00Z') + minute * 60000).toISOString();
 const t = minute => Math.floor(Date.parse(at(minute)) / 1000);
@@ -165,7 +173,7 @@ test('labels stay clear of candles, each other, and chart edges', () => {
     assert.ok(label.bounds.left>=10 && label.bounds.right<=490);
     assert.ok(label.bounds.top>=14 && label.bounds.bottom<=geometry.height-24);
     assert.ok(label.bounds.bottom<115 || label.bounds.top>165);
-    assert.ok(Math.abs(label.anchor.x-label.label.x)>=40);
+    assert.ok(Math.abs(label.anchor.x-label.label.x)>=18);
     for(const bar of geometry.bars) {
       assert.equal(segmentIntersectsBox(label.anchor,label.label,{left:bar.x-5,right:bar.x+5,top:bar.highY,bottom:bar.lowY}),false);
     }
@@ -266,4 +274,63 @@ test('narrow spacing distinguishes a neighboring thin wick from its candle body'
     assert.equal(segmentIntersectsBox(label.anchor,label.label,{left:bar.x-1,right:bar.x+1,top:bar.highY,bottom:bar.lowY}),false);
     assert.equal(segmentIntersectsBox(label.anchor,label.label,{left:bar.x-1.25,right:bar.x+1.25,top:bar.openY,bottom:bar.closeY}),false);
   }
+});
+
+test('single-exit futures bands use the closing fill for winning and losing longs and shorts',()=>{
+ const bars=[0,1,2].map(i=>({time:t(i),open:100,high:103+i,low:98-i,close:101}));
+ for(const side of ['BUY','SELL'])for(const outcome of ['Win','Loss']){
+ const long=side==='BUY',win=outcome==='Win',exit=100.25+(long===win?1:-1)*1.75;
+ const trade={id:99,ticker:'MES',type:'Futures',outcome,entry_candle:'06:59',time_frame:1,instrument:{tick_size:.25},transactions:[{side,price:100.25,quantity:2,filledTime:at(0)},{side:long?'SELL':'BUY',price:exit,quantity:2,filledTime:at(2)}]};
+ const plan=planAnnotation(trade,bars,'1');
+ assert.equal(plan.start.time,t(0));assert.equal(plan.start.price,100.25);assert.equal(plan.end.time,t(2));
+ assert.equal(plan.position_policy,'farthest_exit_v2');assert.equal(plan.exit_band,win?'target':'stop');
+ assert.equal(win?plan.end.price:plan.stop_price,exit);
+ assert.equal(plan.stop_distance,win?5:1.75);
+ assert.equal(positionToolLevels(plan,.25).stopLevel,win?20:7);
+ assert.throws(()=>planAnnotation({...trade,instrument:{}},bars,'1'),/tick size/);
+ // An independently allocated losing entry must not inherit its parent's Win.
+ const entry=planAnnotation({...trade,journal_trade_id:1,outcome:'Win'},bars,'1');
+ assert.equal(entry.exit_band,win?'target':'stop');
+ }
+});
+
+test('leader crossings, shared endpoints and collinear overlaps are rejected',async()=>{
+  const {leadersIntersect}=await import('./journal-annotate.mjs');
+  assert.equal(leadersIntersect({x:0,y:0},{x:10,y:10},{x:0,y:10},{x:10,y:0}),true);
+  assert.equal(leadersIntersect({x:0,y:0},{x:10,y:0},{x:5,y:0},{x:15,y:0}),true);
+  assert.equal(leadersIntersect({x:0,y:0},{x:10,y:0},{x:0,y:2},{x:10,y:2}),false);
+});
+
+test('new futures exit-band evidence passes save validation and rejects a changed exit',async()=>{
+ const {validateChartAnnotations}=await import('./journal-capture.mjs');
+ const bars=[0,1,2].map(i=>({time:t(i),open:100,high:103+i,low:98-i,close:101}));
+ for(const win of [true,false]){
+ const trade={id:99,ticker:'MESZ6',type:'Futures',outcome:win?'Win':'Loss',date:'2026-09-24',time_frame:1,entry_candle:'06:59',instrument:{tick_size:.25},transactions:[{side:'BUY',price:100.25,quantity:2,filledTime:at(0),instrumentType:'FUTURES'},{side:'SELL',price:win?103:100,quantity:1,filledTime:at(1),instrumentType:'FUTURES'},{side:'SELL',price:win?102:99,quantity:1,filledTime:at(2),instrumentType:'FUTURES'}]};
+ const plan=planAnnotation(trade,bars,'1');
+ const result={id:99,chart_path:'/tmp/futures.png',position_entity_id:'p',position_policy:plan.position_policy,exit_band:plan.exit_band,final_exit_price:plan.final_exit_price,position_rr:{entity_id:'p',source:'tradingview_position_tool_label',label:'Risk/reward ratio: 1',value:1},position_tick_size:.25,position_start_candle_time:plan.start.time,position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,position_entry_price:plan.start.price,position_target_price:plan.end.price,position_stop_price:plan.stop_price,stop_distance:plan.stop_distance,resolution:'1',visible_range:{from:t(0)-60,to:t(2)+60},transaction_markers:plan.fills.map(f=>({...f,entity_id:'m'+f.transaction_index,leader_entity_id:'l'+f.transaction_index,anchor_rule:'actual_fill_price',anchor_time:f.time,anchor_price:f.price}))};
+ const row=prefillReview({trades:[trade],groups:[]},'/tmp',[result],[]).trades[0];Object.assign(row.chart_annotations,{view_preserved:true,overlap_checked:true,screenshot_after_annotations:true});
+ assert.doesNotThrow(()=>validateChartAnnotations(row,trade));
+ if(win){assert.equal(row.chart_annotations.position_target_price,103);assert.equal(row.chart_annotations.position_end_candle_time,t(2));}
+ row.chart_annotations[win?'position_target_price':'position_stop_price']+=.25;
+ assert.throws(()=>validateChartAnnotations(row,trade),/final exit fill/);
+ }
+});
+
+
+test('winning partial exits target the farthest actual exit but span through the final close',()=>{
+ const bars=[0,1,2].map(i=>({time:t(i),open:100,high:110,low:90,close:100}));
+ for(const side of ['BUY','SELL']){
+  const long=side==='BUY',closeSide=long?'SELL':'BUY';
+  const trade={id:101,ticker:'MESZ6',type:'Futures',outcome:'Win',time_frame:1,instrument:{tick_size:.25},transactions:[
+   {side,price:100,quantity:4,filledTime:at(0)},
+   {side:closeSide,price:long?106.25:93.75,quantity:2,filledTime:at(1)},
+   {side:closeSide,price:long?101.25:98.75,quantity:2,filledTime:at(2)}]};
+  const plan=planAnnotation(trade,bars,'1');
+  assert.equal(plan.end.price,long?106.25:93.75);
+  assert.equal(plan.end.time,t(2));
+  assert.equal(plan.final_exit_price,long?101.25:98.75);
+  assert.equal(plan.stop_distance,5);
+  assert.equal(plan.fills.length,3);
+  assert.equal(plan.mfe.price,long?110:90);
+ }
 });

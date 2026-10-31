@@ -9,6 +9,7 @@ rules.json
 .DS_Store
 
 # Personal capture evidence and generated runs
+/captures/
 /backtest-captures/
 /key-level-comparisons/
 /tag-audit-2026-09-21/
