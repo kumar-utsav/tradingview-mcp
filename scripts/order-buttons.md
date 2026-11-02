@@ -12,7 +12,9 @@ Real Webull/TradeStation order acceptance and execution remain unverified.
 2. Connect the intended broker and account on the intended chart tab. For Replay,
    start the desired replay session first.
 3. Double-click [Start TradingView Order Buttons.command](<Start TradingView Order Buttons.command>).
-   Keep its terminal open. It prints the broker, account type, contract, and readiness.
+   If asked, bring the intended TradingView chart to the front; the launcher
+   waits up to 30 seconds when Terminal has hidden the app. It never guesses a
+   hidden destination. Keep its terminal open. It prints the broker, account type, contract, and readiness.
 4. Focus that chart, move the pointer to the desired price, and press a shortcut.
 
 The launcher finds Node.js on PATH or under `~/.nvm/versions/node/`; set
@@ -41,6 +43,13 @@ Use **System → Open** with the standard `.command` file for one start-service 
 | Sell Limit | F18 | Shift+F18 | Control+F18 | Control+Shift+F18 |
 | Sell Stop | F16 | Shift+F16 | Control+F16 | Control+Shift+F16 |
 
+**Cancel all pending orders: F19** (no modifiers). This needs TradingView focus
+but does not require the pointer over the chart. It targets the entire pinned
+account, across all symbols, including protective stop-loss/take-profit orders.
+Positions remain open. Orders can fill before cancellation reaches the broker.
+It uses the same serialized queue and account/session checks; partial or unknown
+outcomes block further requests until inspected. Preview modes only report a count.
+
 F14/F15 remain aliases for Buy Stop/Sell Limit. They did not reach TradingView
 from this Mac's Stream Deck during diagnosis. F17/F18 passed CDP keyboard tests;
 physical device delivery is a separate check. The handlers operate only in the
@@ -53,7 +62,8 @@ to TradingView unless its profile is configured that way.
   Buy Limit/Sell Stop must be below the market; Sell Limit/Buy Stop above it.
   Marketable/already-triggered prices are rejected. Pending orders can fill later.
 - Each press creates a separate DAY entry order, without TP/SL, OCO, ticket reuse,
-  modification, or cancellation. Existing orders and positions are preserved.
+  modification, or cancellation. Existing orders and positions are preserved
+  by entry shortcuts; F19 is the explicit account-wide cancellation action.
 - Requests are serialized with a maximum queue of 64; held-key repeats are ignored.
   Captured requests expire after five seconds. An uncertain submission outcome
   blocks further requests: inspect broker orders before restarting, never blindly retry.

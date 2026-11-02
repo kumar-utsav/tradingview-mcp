@@ -12,7 +12,7 @@ import { OrderButtonQueue } from '../src/core/order-button-queue.js';
 
 export const socketPath = join(tmpdir(), `tv-order-buttons-${process.getuid()}.sock`);
 
-function installKeys(mode, quantities, ownerId, brokerLabel) {
+export function installKeys(mode, quantities, ownerId, brokerLabel) {
   if (!document.body) { document.addEventListener('DOMContentLoaded', () => installKeys(mode, quantities, ownerId, brokerLabel), { once: true }); return; }
   window.__tvOrderButtons?.dispose();
   document.getElementById('tv-order-buttons-status')?.remove();
@@ -30,18 +30,21 @@ function installKeys(mode, quantities, ownerId, brokerLabel) {
   };
   const feedback = text => enqueue({ feedback: text });
   feedback(mode === 'replay' ? 'REPLAY TRADING · historical simulated orders enabled' : mode === 'paper' ? 'PAPER TRADING · independent simulated orders enabled' : mode === 'connected' ? `${brokerLabel} · connected-account order shortcuts enabled` : mode === 'live' ? `LIVE ${brokerLabel} · real order submission enabled` : mode === 'broker-demo' ? `${brokerLabel} DEMO · simulated orders enabled` : `${brokerLabel} DRY RUN · nothing will be submitted`);
-  const capture = () => {
+  const capture = (requirePrice = true) => {
     if (!document.hasFocus() || document.visibilityState !== 'visible') throw new Error('Focus the connected TradingView tab');
     const trading = window.TradingViewApi?._tradingService?.trading();
-    const chart = window.TradingViewApi?._activeChartWidgetWV.value()._chartWidget;
-    const series = chart?.model().mainSeries();
-    const pane = chart?.paneWidgets().find(p => p.state().dataSources().includes(series));
-    const rect = pane?.canvasElement().getBoundingClientRect();
-    if (!pointer || !rect || pointer.x < rect.left || pointer.x >= rect.right || pointer.y < rect.top || pointer.y >= rect.bottom) throw new Error('Move the cursor over the price chart');
-    // Read the price at the actual pointer Y. Native crosshairPrice can snap to
-    // a candle/drawing when modifier keys temporarily enable magnet behavior.
-    const price = series.priceScale().coordinateToPrice((pointer.y - rect.top) * pane.height() / rect.height, series.firstValue());
-    if (!Number.isFinite(price)) throw new Error('Chart price scale is not ready');
+    let price;
+    if (requirePrice) {
+      const chart = window.TradingViewApi?._activeChartWidgetWV.value()._chartWidget;
+      const series = chart?.model().mainSeries();
+      const pane = chart?.paneWidgets().find(p => p.state().dataSources().includes(series));
+      const rect = pane?.canvasElement().getBoundingClientRect();
+      if (!pointer || !rect || pointer.x < rect.left || pointer.x >= rect.right || pointer.y < rect.top || pointer.y >= rect.bottom) throw new Error('Move the cursor over the price chart');
+      // Read the price at the actual pointer Y. Native crosshairPrice can snap to
+      // a candle/drawing when modifier keys temporarily enable magnet behavior.
+      price = series.priceScale().coordinateToPrice((pointer.y - rect.top) * pane.height() / rect.height, series.firstValue());
+      if (!Number.isFinite(price)) throw new Error('Chart price scale is not ready');
+    }
     const broker = trading.activeBroker();
     const replayTime = window.TradingViewApi._replayApi?.currentDate();
     return { price, capturedAt: Date.now(), chartSymbol: trading.linking().value().symbol,
@@ -51,11 +54,16 @@ function installKeys(mode, quantities, ownerId, brokerLabel) {
     // F14/F15 can be intercepted before reaching Electron on macOS.
     const key = e.code || e.key;
     const index = key === 'F17' ? 1 : key === 'F18' ? 2 : ['F13', 'F14', 'F15', 'F16'].indexOf(key);
-    if (index < 0 || e.altKey || e.metaKey || !e.isTrusted) return;
+    const cancelling = key === 'F19' && !e.ctrlKey && !e.shiftKey;
+    if ((index < 0 && !cancelling) || e.altKey || e.metaKey || !e.isTrusted) return;
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.repeat) return;
     if (document.activeElement?.matches('input,textarea,[contenteditable="true"]')) { feedback('Finish editing the input before placing an order'); return; }
     try {
+      if (cancelling) {
+        enqueue({ request: { id: crypto.randomUUID(), action: 'cancel-all', ...capture(false) } });
+        return;
+      }
       const [side, type] = [['buy', 'limit'], ['buy', 'stop'], ['sell', 'limit'], ['sell', 'stop']][index];
       const quantity = quantities[e.ctrlKey ? (e.shiftKey ? 3 : 2) : (e.shiftKey ? 1 : 0)];
       enqueue({ request: { id: crypto.randomUUID(), side, type, quantity, ...capture() } });
@@ -103,13 +111,31 @@ export async function selectOrderTarget(mode, targetId = null, executionBroker =
   return selected;
 }
 
+/** Terminal/Stage Manager can hide TradingView during launcher startup. */
+export async function waitForOrderTarget(select, { timeoutMs = 30000, pause = () => new Promise(resolve => setTimeout(resolve, 500)), now = Date.now, onWait = () => {} } = {}) {
+  const deadline = now() + timeoutMs;
+  let announced = false;
+  while (true) {
+    try { return await select(); }
+    catch (error) {
+      if (!/No connected chart tab matches|Multiple matching chart tabs/.test(error.message)) throw error;
+      if (!announced) { announced = true; onWait(); }
+      if (now() >= deadline) throw new Error('Could not identify the intended TradingView tab. Bring TradingView and the desired connected chart to the front, then launch again. Existing service was left running.');
+      await pause();
+    }
+  }
+}
+
 export async function serve({ mode, allowLive = false, quantities = [4, 3, 2, 1], targetId = null, executionBroker = 'Webull' }) {
   if (!['paper', 'replay', 'dry-run', 'live', 'broker-demo', 'connected'].includes(mode)) throw new Error('Choose a supported mode; the standard launcher uses --connected');
   if (!['Webull', 'TradeStation'].includes(executionBroker)) throw new Error('Unsupported broker');
   if (mode === 'connected') allowLive = true; // Explicit user-selected execution mode.
   if (mode === 'live' && !allowLive) throw new Error('Live activation requires --enable-live-orders');
   if (quantities.length !== 4 || quantities.some(qty => !Number.isSafeInteger(qty) || qty < 1)) throw new Error('--sizes requires four positive whole numbers');
-  const target = await selectOrderTarget(mode, targetId, executionBroker);
+  const choose = () => selectOrderTarget(mode, targetId, executionBroker);
+  const target = mode === 'connected' && !targetId
+    ? await waitForOrderTarget(choose, { onWait: () => console.log('Bring TradingView and the intended connected chart to the front. Waiting up to 30 seconds…') })
+    : await choose();
   let c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
   const snapshot = await sessionSnapshot(c);
   if (mode === 'connected' ? !['Paper', 'REPLAYBROKER', 'WEBULL', 'TRADESTATION'].includes(snapshot.brokerId) || !['demo', 'live'].includes(snapshot.accountType) || !snapshot.account : mode === 'replay' ? snapshot.brokerId !== 'REPLAYBROKER' || snapshot.accountType !== 'demo' || !snapshot.inReplay || !Number.isFinite(snapshot.replayTime) : mode === 'paper' ? snapshot.brokerId !== 'Paper' || snapshot.accountType !== 'demo' || snapshot.inReplay : snapshot.broker !== executionBroker || snapshot.brokerId !== (executionBroker === 'TradeStation' ? 'TRADESTATION' : 'WEBULL') || snapshot.inReplay || (mode === 'broker-demo' && snapshot.accountType !== 'demo') || (mode === 'live' && snapshot.accountType !== 'live')) throw new Error('Active broker does not match the selected service mode');
@@ -145,6 +171,10 @@ export async function serve({ mode, allowLive = false, quantities = [4, 3, 2, 1]
       const result = await runOrder(frozen, policy, c);
       history.push(result);
       if (history.length > 32) history.shift();
+      if (result.action === 'cancel-all') {
+        display(result.uncertain ? 'CHECK ORDERS · ' + result.error : mode === 'dry-run' ? `DRY RUN · would cancel ${result.wouldCancel} pending orders` : `CANCEL ALL · ${result.cancelled} cancelled · ${result.remaining} remaining · ${result.filledDuringCancel} filled during cancellation`);
+        return result;
+      }
       const summary = `${result.side} ${result.type} ${result.quantity} @ ${result.price} · ${result.symbol}`;
       await display(result.uncertain ? 'CHECK ORDERS · ' + result.error : result.error ? 'REJECTED · ' + result.error : mode === 'dry-run' ? `DRY RUN · ${summary} · nothing submitted` : `${mode.toUpperCase()} · ${summary} · ID ${result.id} · ${result.status === 2 ? 'FILLED' : 'working'} · ${Math.round(result.totalMs)} ms`);
       return result;

@@ -1,6 +1,7 @@
 /* global window, performance */
 
 export function validateOrderRequest(request) {
+  if (request?.action === 'cancel-all') return request;
   if (!['buy', 'sell'].includes(request?.side) || !['limit', 'stop'].includes(request?.type)) throw new Error('Expected buy/sell and limit/stop');
   if (!Number.isSafeInteger(request.quantity) || request.quantity < 1) throw new Error('Quantity must be a positive whole number');
   if (!Number.isFinite(request.price)) throw new Error('No chart price captured');
@@ -27,7 +28,7 @@ export async function runOrder(request, policy, client) {
     if (error.pageException) throw error; // Page validation rejected before submission.
     // The page may already have sent the order when its transport disappeared.
     // Never retry or allow the queue to continue on an unknown outcome.
-    return { mode: policy.mode, broker: policy.broker, symbol: policy.symbol,
+    return { action: request.action, mode: policy.mode, broker: policy.broker, symbol: policy.symbol,
       side: request.side, type: request.type, quantity: request.quantity, price: request.price,
       submitted: null, uncertain: true,
       error: 'Chart connection failed; inspect broker orders before retrying: ' + error.message };
@@ -38,8 +39,8 @@ export async function runOrder(request, policy, client) {
 export async function orderInPage(request, policy) {
   const started = performance.now();
   if (!['paper', 'replay', 'dry-run', 'live', 'broker-demo', 'connected'].includes(policy.mode)) throw new Error('Unknown execution mode');
-  if (!Number.isSafeInteger(request.quantity) || request.quantity < 1 || !Number.isFinite(request.price)) throw new Error('Invalid quantity or price');
-  if (!['buy', 'sell'].includes(request.side) || !['limit', 'stop'].includes(request.type)) throw new Error('Unsupported order type');
+  if (request.action !== 'cancel-all' && (!Number.isSafeInteger(request.quantity) || request.quantity < 1 || !Number.isFinite(request.price))) throw new Error('Invalid quantity or price');
+  if (request.action !== 'cancel-all' && (!['buy', 'sell'].includes(request.side) || !['limit', 'stop'].includes(request.type))) throw new Error('Unsupported order type');
   if (!Number.isFinite(request.capturedAt) || Date.now() - request.capturedAt > 5000 || request.capturedAt > Date.now() + 1000) throw new Error('Captured price expired; move the pointer and press again');
   const trading = window.TradingViewApi?._tradingService?.trading();
   const broker = trading?.activeBroker();
@@ -78,6 +79,42 @@ export async function orderInPage(request, policy) {
   // Replay's facade and provider caches lag while paused. Read its native
   // replay transport capability so acknowledgement never needs a bar advance.
   const readOrders = replayDestination ? () => broker._brokerConnection._brokerConnection.currentAccountApi().ordersCapability.get() : () => broker.orders();
+  if (request.action === 'cancel-all') {
+    const common = { action: 'cancel-all', mode: policy.mode, broker: original.title };
+    const pending = order => [3, 4, 6].includes(order.status);
+    const targets = (await readOrders()).filter(pending);
+    const ids = targets.map(order => String(order.id));
+    if (ids.some(id => !id || id === 'undefined' || id === 'null')) throw new Error('Open order is missing an ID');
+    assertDestination();
+    if (policy.mode === 'dry-run') return { ...common, submitted: false, verified: true, wouldCancel: ids.length };
+    let attempted = 0;
+    const errors = [];
+    try {
+      for (const id of ids) {
+        assertDestination();
+        attempted++;
+        try { await broker.cancelOrder(id); }
+        catch (error) { errors.push({ id, error: error.message }); }
+      }
+      const deadline = performance.now() + 3000;
+      let remaining;
+      do {
+        assertDestination();
+        remaining = await readOrders();
+        if (!remaining.some(pending)) break;
+        await new Promise(resolve => setTimeout(resolve, 30));
+      } while (performance.now() < deadline);
+      const open = remaining.filter(pending).map(order => String(order.id));
+      const cancelled = ids.filter(id => !remaining.some(order => String(order.id) === id) || remaining.some(order => String(order.id) === id && order.status === 1)).length;
+      const filledDuringCancel = ids.filter(id => remaining.some(order => String(order.id) === id && order.status === 2)).length;
+      return { ...common, submitted: attempted > 0, attempted, cancelled, filledDuringCancel, remaining: open.length, errors,
+        verified: open.length === 0, uncertain: open.length > 0,
+        ...(open.length ? { error: 'Some orders remain open; inspect broker orders before retrying' } : {}), totalMs: performance.now() - started };
+    } catch (error) {
+      if (!attempted) throw error;
+      return { ...common, submitted: null, attempted, uncertain: true, error: 'Cancellation outcome unknown; inspect broker orders: ' + error.message };
+    }
+  }
   const chartSymbol = trading.linking().value().symbol;
   if (chartSymbol !== request.chartSymbol) throw new Error('Chart changed after the key press');
   const resolved = await trading.getActualSymbol(chartSymbol);

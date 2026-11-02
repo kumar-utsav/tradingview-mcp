@@ -5,7 +5,7 @@ import net from 'node:net';
 import { mkdtemp, lstat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { serve, closeOrderService } from '../scripts/order-buttons.mjs';
+import { serve, closeOrderService, installKeys, waitForOrderTarget } from '../scripts/order-buttons.mjs';
 import { orderInPage, validateOrderRequest, runOrder } from '../src/core/order-buttons.js';
 import { OrderButtonQueue } from '../src/core/order-button-queue.js';
 
@@ -14,6 +14,7 @@ const request = overrides => ({ side: 'buy', type: 'limit', quantity: 4, price: 
 function fixture(options = {}) {
   const orders = [];
   const calls = [];
+  const cancellations = [];
   const broker = {
     metainfo: () => ({ id: options.brokerId || 'Paper', title: options.title || 'Paper Trading' }),
     currentAccount: () => options.account || 'demo-account', currentAccountType: () => options.accountType || 'demo', isConnected: () => true,
@@ -23,6 +24,13 @@ function fixture(options = {}) {
     createInitialPreOrder: async order => options.addBrackets ? { ...order, stopLoss: 7400 } : order,
     orders: async () => options.staleReplayCache ? [] : orders,
     _brokerConnection: { _brokerConnection: { currentAccountApi: () => ({ ordersCapability: { get: async () => orders } }) } },
+    cancelOrder: async id => {
+      cancellations.push(String(id));
+      if (options.cancelFails) throw new Error('Cancel connection lost');
+      const order = orders.find(o => String(o.id) === String(id));
+      if (order) order.status = options.fillOnCancel ? 2 : 1;
+      if (options.changeAccountOnCancel) options.account = 'changed-account';
+    },
     placeOrder: async order => {
       calls.push({ ...order });
       if (options.throws) throw new Error('network lost');
@@ -33,7 +41,7 @@ function fixture(options = {}) {
   const trading = { activeBroker: () => broker, isInReplay: () => ({ value: () => !!options.inReplay }), linking: () => ({ value: () => ({ symbol: policy.symbol }) }), getActualSymbol: async symbol => ({ symbol }) };
   const replay = { isReplayStarted: () => ({ value: () => options.replayStarted !== false }), currentDate: () => ({ value: () => options.replayTime ?? 1700000000 }) };
   const fn = vm.runInNewContext(`(${orderInPage.toString()})`, { window: { TradingViewApi: { _tradingService: { trading: () => trading }, _replayApi: replay } }, performance, Date, setTimeout });
-  return { run: (r, p = policy) => fn(r, p), calls, orders };
+  return { run: (r, p = policy) => fn(r, p), calls, orders, cancellations };
 }
 
 test('opposite-side and repeated orders retain each prior order with unique IDs', async () => {
@@ -222,6 +230,7 @@ test('a failed destination preflight never stops the existing service', async ()
   let socketChecks = 0;
   const start = vm.runInNewContext(`(${serve.toString()})`, {
     selectOrderTarget: async () => { throw new Error('No active destination'); },
+    waitForOrderTarget: select => select(),
     lstat: async () => { socketChecks++; throw new Error('Must not touch old service'); },
   });
   await assert.rejects(start({ mode: 'connected' }), /No active destination/);
@@ -254,4 +263,92 @@ test('replacement waits for shutdown cleanup and keeps its new socket', async ()
     if (replacement?.listening) await new Promise(resolve => replacement.close(resolve));
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+
+const cancelRequest = () => ({ action: 'cancel-all', capturedAt: Date.now(), replaySession: 'replay-session', replayTime: 1700000000 });
+for (const [name, options, p] of [
+  ['Paper', {}, policy],
+  ['Replay', { ...replayOptions, staleReplayCache: true }, replayPolicy],
+  ['Webull', { brokerId: 'WEBULL', title: 'Webull', accountType: 'live' }, { ...policy, mode: 'connected', brokerId: 'WEBULL', broker: 'Webull', accountType: 'live', allowLive: true }],
+  ['TradeStation', { brokerId: 'TRADESTATION', title: 'TradeStation' }, tradeStationPolicy],
+]) {
+  test(`cancel all on ${name} cancels pending orders across symbols without closing positions`, async () => {
+    const f = fixture(options);
+    f.orders.push({ id: 'a', symbol: 'MES', status: 6 }, { id: 'b', symbol: 'NQ', status: 3 }, { id: 'c', status: 4 }, { id: 'filled', status: 2 }, { id: 'cancelled', status: 1 });
+    const result = await f.run(cancelRequest(), p);
+    assert.equal(result.verified, true);
+    assert.equal(result.cancelled, 3);
+    assert.deepEqual(f.cancellations, ['a', 'b', 'c']);
+    assert.equal(f.calls.length, 0, 'Must not create offsetting orders');
+    assert.equal(f.orders.find(o => o.id === 'filled').status, 2);
+  });
+}
+test('cancel all dry run and no-open-orders make no cancellation calls', async () => {
+  const f = fixture();
+  f.orders.push({ id: 'a', status: 6 });
+  const result = await f.run(cancelRequest(), { ...policy, mode: 'dry-run' });
+  assert.equal(result.wouldCancel, 1);
+  assert.equal(result.submitted, false);
+  assert.equal(f.cancellations.length, 0);
+  f.orders.length = 0;
+  assert.equal((await f.run(cancelRequest())).cancelled, 0);
+});
+test('cancel all stops if account changes during the batch', async () => {
+  const f = fixture({ changeAccountOnCancel: true });
+  f.orders.push({ id: 'a', status: 6 }, { id: 'b', status: 6 });
+  const result = await f.run(cancelRequest());
+  assert.equal(result.uncertain, true);
+  assert.deepEqual(f.cancellations, ['a']);
+});
+test('cancel all reports orders that fill during cancellation accurately', async () => {
+  const f = fixture({ fillOnCancel: true });
+  f.orders.push({ id: 'a', status: 6 });
+  const result = await f.run(cancelRequest());
+  assert.equal(result.cancelled, 0);
+  assert.equal(result.filledDuringCancel, 1);
+  assert.equal(result.remaining, 0);
+});
+test('cancel all rejects stale requests before cancelling', async () => {
+  const f = fixture();
+  await assert.rejects(f.run({ ...cancelRequest(), capturedAt: Date.now() - 6000 }), /expired/);
+  assert.equal(f.cancellations.length, 0);
+});
+
+
+test('F19 enqueues one cancel-all command without needing a chart cursor', () => {
+  const listeners = new Map();
+  const document = { body: {}, getElementById: () => null, hasFocus: () => true, visibilityState: 'visible', activeElement: null,
+    addEventListener: (name, handler) => listeners.set(name, handler), removeEventListener: () => {} };
+  const trading = { activeBroker: () => ({ metainfo: () => ({ id: 'Paper' }) }), linking: () => ({ value: () => ({ symbol: policy.symbol }) }) };
+  const window = { addEventListener: () => {}, removeEventListener: () => {}, TradingViewApi: { _tradingService: { trading: () => trading } } };
+  const install = vm.runInNewContext(`(${installKeys.toString()})`, { window, document, crypto: { randomUUID: () => 'cancel-key' } });
+  install('connected', [4, 3, 2, 1], 'owner', 'Paper Trading');
+  window.__tvOrderButtons.drain();
+  const event = { code: 'F19', isTrusted: true, preventDefault: () => {}, stopImmediatePropagation: () => {} };
+  listeners.get('keydown')(event);
+  listeners.get('keydown')({ ...event, repeat: true });
+  const messages = window.__tvOrderButtons.drain();
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].request.action, 'cancel-all');
+  assert.equal(messages[0].request.price, undefined);
+});
+
+
+test('launcher waits through hidden charts and selects only the identified active destination', async () => {
+  let attempts = 0, clock = 0, announced = 0;
+  const target = { id: 'intended-visible-tab' };
+  const result = await waitForOrderTarget(async () => {
+    attempts++;
+    if (attempts < 3) throw new Error('No connected chart tab matches the requested execution mode');
+    return target;
+  }, { now: () => clock, pause: async () => { clock += 500; }, onWait: () => { announced++; } });
+  assert.equal(result, target);
+  assert.equal(attempts, 3);
+  assert.equal(announced, 1);
+});
+test('launcher times out without guessing a hidden destination', async () => {
+  let clock = 0;
+  await assert.rejects(waitForOrderTarget(async () => { throw new Error('No connected chart tab matches the requested execution mode'); },
+    { timeoutMs: 1000, now: () => clock, pause: async () => { clock += 500; } }), /Bring TradingView/);
 });
