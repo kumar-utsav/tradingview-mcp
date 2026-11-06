@@ -1,5 +1,8 @@
 # Capture journal
 
+For captures and saved-pack continuations, follow the shared
+[chat-title step](capture-chat-title.md) once the trading date and ticker are known.
+
 New run files belong under `/Users/utsav/Projects/tradingview-mcp/captures/journal/YYYY-MM-DD-run-id/`.
 Never create capture folders or files on the Desktop. Keep pending packs here
 for recovery; put disposable audits/scripts in the OS temporary directory.

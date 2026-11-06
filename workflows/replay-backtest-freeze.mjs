@@ -8,7 +8,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {evaluate,evaluateAsync,getClient,disconnect} from '../src/connection.js';
 import {captureChartScreenshot,captureIsolatedTradeScreenshots,frozenChartEvidenceExpression} from '../src/core/trading-sync.js';
-import {replaySnapshotExpression,buildReplayLedger,ledgerByEntry,mapReplayDrawings} from '../src/core/replay-capture.js';
+import {replaySnapshotExpression,buildReplayLedger,ledgerByEntry,mapReplayDrawings,REPLAY_FEE_MODEL} from '../src/core/replay-capture.js';
 import {getPineLabels,getPineLines,getPineBoxes} from '../src/core/data.js';
 import {preflight,capturePrompts,captureAnswers} from './capture-review.mjs';
 import {preflightNotes} from './capture-notes.mjs';
@@ -69,9 +69,9 @@ export async function freezeReplayDay(date,directory,{deps={},grouping='per_entr
   directory=assertCapturePath(directory);
   const readiness=await (deps.preflight||(notesOnly?preflightNotes:preflight))('backtest');
   if(readiness?.ready!==true)throw Error('Backtest capture backend is not ready');
-  const read=deps.evaluate||evaluate,readAsync=deps.evaluateAsync||evaluateAsync,capture=deps.captureScreenshot||captureChartScreenshot;
+  const read=deps.evaluate||evaluate,readAsync=deps.evaluateAsync||deps.evaluate||evaluateAsync,capture=deps.captureScreenshot||captureChartScreenshot;
   directory=path.resolve(directory);await fs.mkdir(path.dirname(directory),{recursive:true});await fs.mkdir(directory);
-  const snapshot=await read(replaySnapshotExpression);
+  const snapshot=await readAsync(replaySnapshotExpression);
   await write(path.join(directory,'replay-raw.json'),json(snapshot));
   const original=await (deps.captureFull|| (async()=>{const c=await getClient();return (await c.Page.captureScreenshot({format:'png'})).data;}))();
   if(!original)throw Error('Original replay screenshot was empty');
@@ -99,7 +99,7 @@ export async function freezeReplayDay(date,directory,{deps={},grouping='per_entr
   async function unchanged(){
     const current=await read(frozenChartEvidenceExpression(date,true,false));
     current.drawings=current.drawings?.filter(d=>!generated.includes(d.id));
-    if(json(current)!==identity||json(await read(replaySnapshotExpression))!==reportIdentity)throw Error('Chart or replay fills changed during capture; retain recovery and coordinate a retry');
+    if(json(current)!==identity||json(await readAsync(replaySnapshotExpression))!==reportIdentity)throw Error('Chart or replay fills changed during capture; retain recovery and coordinate a retry');
   }
   await unchanged();
   const graphics={};
@@ -125,6 +125,8 @@ export async function freezeReplayDay(date,directory,{deps={},grouping='per_entr
   for(let i=0;i<images.length;i++)await write(path.join(directory,`position-${i+1}.png`),Buffer.from(images[i].screenshot.base64,'base64'));
   const frozen={version:1,capture_kind:'replay_fills',...(notesOnly?{notes_only:true}:{questionnaire_version:1}),idempotency_key:randomUUID(),frozen_at:new Date().toISOString(),
     ledger,evidence:{...evidence,graphics},screenshot_mapping:images.map((im,i)=>({source_id:im.source_id,file:`position-${i+1}.png`}))};
+  if(notesOnly && readiness.capabilities?.modeled_replay_fees===true && /^(MES|MNQ)(1!|[FGHJKMNQUVXZ]\d{1,4})?$/.test(ledger.symbol.split(':').pop()))
+    frozen.fee_model={id:REPLAY_FEE_MODEL,request_id:frozen.idempotency_key,applied_at:frozen.frozen_at};
   await write(path.join(directory,'frozen.json'),json(frozen));
   await write(path.join(directory,'ledger.json'),json(ledger));
   await write(path.join(directory,'report.md'),replayReport(ledger));

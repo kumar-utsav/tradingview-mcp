@@ -261,3 +261,11 @@ items as described above and in workflows/capture-backtest-day.md. Explicit
 notes-only/no-checklist requests skip selection. Journal update, 2026-10-26:
 apply the same behavior through workflows/capture-journal.md, including proposing
 missing generic items before creation and preserving unrelated selections.
+
+## Capture exclusions — user preference, 2026-11-02
+
+When the user excludes trades, remove them from the retained capture and renumber
+remaining trades consecutively in all user-facing lists and note prompts. Keep
+immutable execution/source IDs and sealed evidence internally for integrity;
+original numbering belongs only in internal provenance. Apply this to future
+captures; the 2026-10-26 capture keeps its current numbering by explicit request.

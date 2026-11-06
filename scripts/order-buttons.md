@@ -23,7 +23,10 @@ Stop with Control+C in its terminal. Starting another service automatically stop
 the previous one, waits for outstanding acknowledgements, and replaces its handlers.
 It does not cancel or modify existing broker orders.
 
-The service pins the tab, broker, account, account type, and resolved contract.
+The service pins the tab, broker, account, account type, and the chart IDs and
+resolved contracts present in its layout at startup. In split layouts it uses the
+chart under the mouse and that chart’s price scale, even if a different chart was
+last clicked. Restart after adding charts or changing a chart’s symbol.
 Restart the same launcher after changing those or the replay session. If the
 original tab is closed, it never attaches to a different tab automatically.
 It restores lost key handlers and reconnects to the original tab when available.
@@ -95,11 +98,12 @@ Dry-run modes never submit. These are optional modes of the same service.
 ```sh
 npm run test:order-buttons
 npm run lint
+node scripts/check-order-buttons-broker.mjs --paper
 node scripts/check-order-buttons-broker.mjs
 node scripts/check-order-buttons-broker.mjs --tradestation
 ```
 
-Broker preflight checks all 16 combinations without submission or replacing the
+Broker preflight checks all 16 combinations on every registered chart without submission or replacing the
 running service. It requires the selected broker to be connected outside Replay.
 It does not establish quote freshness, data entitlements, buying power, or live
 broker acceptance. Adapter maximum quantity may be a placeholder.

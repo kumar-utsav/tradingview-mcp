@@ -33,21 +33,30 @@ export function installKeys(mode, quantities, ownerId, brokerLabel) {
   const capture = (requirePrice = true) => {
     if (!document.hasFocus() || document.visibilityState !== 'visible') throw new Error('Focus the connected TradingView tab');
     const trading = window.TradingViewApi?._tradingService?.trading();
-    let price;
+    let price, chartId;
+    let chartSymbol = trading.linking().value().symbol;
     if (requirePrice) {
-      const chart = window.TradingViewApi?._activeChartWidgetWV.value()._chartWidget;
-      const series = chart?.model().mainSeries();
-      const pane = chart?.paneWidgets().find(p => p.state().dataSources().includes(series));
-      const rect = pane?.canvasElement().getBoundingClientRect();
-      if (!pointer || !rect || pointer.x < rect.left || pointer.x >= rect.right || pointer.y < rect.top || pointer.y >= rect.bottom) throw new Error('Move the cursor over the price chart');
-      // Read the price at the actual pointer Y. Native crosshairPrice can snap to
-      // a candle/drawing when modifier keys temporarily enable magnet behavior.
+      const api = window.TradingViewApi;
+      const charts = api._chartWidgetCollection?.getAll?.() || [api._activeChartWidgetWV.value()._chartWidget];
+      const hits = [];
+      for (const chart of charts) {
+        const series = chart?.model().mainSeries();
+        const pane = chart?.paneWidgets().find(p => p.state().dataSources().includes(series));
+        const rect = pane?.canvasElement().getBoundingClientRect();
+        if (pointer && rect && rect.right > rect.left && rect.bottom > rect.top && pointer.x >= rect.left && pointer.x < rect.right && pointer.y >= rect.top && pointer.y < rect.bottom) hits.push({ chart, series, pane, rect });
+      }
+      if (hits.length !== 1) throw new Error('Move the cursor over one price chart');
+      const { chart, series, pane, rect } = hits[0];
+      chartId = typeof chart.id === 'function' ? String(chart.id()) : null;
+      chartSymbol = series.symbol();
+      // Each chart has its own price scale, independent of the last clicked chart.
       price = series.priceScale().coordinateToPrice((pointer.y - rect.top) * pane.height() / rect.height, series.firstValue());
       if (!Number.isFinite(price)) throw new Error('Chart price scale is not ready');
     }
     const broker = trading.activeBroker();
-    const replayTime = window.TradingViewApi._replayApi?.currentDate();
-    return { price, capturedAt: Date.now(), chartSymbol: trading.linking().value().symbol,
+    const replayApi = window.TradingViewApi._replayApi || window.__tvOrderReplayController;
+    const replayTime = replayApi?.currentDate?.() ?? replayApi?.replayCurrentDate?.();
+    return { price, chartId, capturedAt: Date.now(), chartSymbol,
       ...(broker.metainfo().id === 'REPLAYBROKER' ? { replaySession: broker.sessionId(), replayTime: typeof replayTime?.value === 'function' ? replayTime.value() : replayTime } : {}) };
   };
   const onKey = e => {
@@ -81,11 +90,20 @@ export async function sessionSnapshot(client = null) {
     if (!broker?.isConnected()) throw new Error('Connect the intended broker first');
     const chartSymbol = trading.linking().value().symbol;
     const replay = trading.isInReplay();
-    const replayTime = window.TradingViewApi._replayApi?.currentDate();
-    return { broker: broker.metainfo().title, brokerId: broker.metainfo().id,
+    const inReplay = typeof replay?.value === 'function' ? replay.value() : replay;
+    const api = window.TradingViewApi;
+    const replayApi = api._replayApi || ((inReplay || broker.metainfo().id === 'REPLAYBROKER') ? (await api._loadReplayController?.())?.controller : null);
+    window.__tvOrderReplayController = replayApi;
+    const replayTime = replayApi?.currentDate?.() ?? replayApi?.replayCurrentDate?.();
+    const widgets = window.TradingViewApi._chartWidgetCollection?.getAll?.() || [];
+    const charts = await Promise.all(widgets.map(async chart => {
+      const chartSymbol = chart.model().mainSeries().symbol();
+      return { id: String(chart.id()), chartSymbol, symbol: (await trading.getActualSymbol(chartSymbol)).symbol };
+    }));
+    return { charts, broker: broker.metainfo().title, brokerId: broker.metainfo().id,
       account: String(broker.currentAccount()), accountType: broker.currentAccountType(),
       symbol: (await trading.getActualSymbol(chartSymbol)).symbol, chartSymbol,
-      inReplay: typeof replay?.value === 'function' ? replay.value() : replay,
+      inReplay,
       replaySession: broker.metainfo().id === 'REPLAYBROKER' ? broker.sessionId() : null,
       replayTime: typeof replayTime?.value === 'function' ? replayTime.value() : replayTime };
   })()`);
@@ -139,7 +157,7 @@ export async function serve({ mode, allowLive = false, quantities = [4, 3, 2, 1]
   let c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
   const snapshot = await sessionSnapshot(c);
   if (mode === 'connected' ? !['Paper', 'REPLAYBROKER', 'WEBULL', 'TRADESTATION'].includes(snapshot.brokerId) || !['demo', 'live'].includes(snapshot.accountType) || !snapshot.account : mode === 'replay' ? snapshot.brokerId !== 'REPLAYBROKER' || snapshot.accountType !== 'demo' || !snapshot.inReplay || !Number.isFinite(snapshot.replayTime) : mode === 'paper' ? snapshot.brokerId !== 'Paper' || snapshot.accountType !== 'demo' || snapshot.inReplay : snapshot.broker !== executionBroker || snapshot.brokerId !== (executionBroker === 'TradeStation' ? 'TRADESTATION' : 'WEBULL') || snapshot.inReplay || (mode === 'broker-demo' && snapshot.accountType !== 'demo') || (mode === 'live' && snapshot.accountType !== 'live')) throw new Error('Active broker does not match the selected service mode');
-  const policy = { mode, brokerId: snapshot.brokerId, accountType: snapshot.accountType, broker: snapshot.broker, account: snapshot.account, symbol: snapshot.symbol, allowLive, replaySession: snapshot.replaySession };
+  const policy = { mode, charts: snapshot.charts, brokerId: snapshot.brokerId, accountType: snapshot.accountType, broker: snapshot.broker, account: snapshot.account, symbol: snapshot.symbol, allowLive, replaySession: snapshot.replaySession };
   try {
     const entry = await lstat(socketPath);
     if (!entry.isSocket() || entry.uid !== process.getuid()) throw new Error('Refusing to replace unrelated socket-path contents');
@@ -187,7 +205,7 @@ export async function serve({ mode, allowLive = false, quantities = [4, 3, 2, 1]
       setTimeout(() => { void shutdown(); }, 25);
       return { stopping: true };
     }
-    if (message.action === 'status') return { mode, broker: policy.broker, accountType: policy.accountType, symbol: policy.symbol, target: target.id, quantities, pending: queue.pending, blocked: queue.blocked, link: { ...link, healthy: link.connected && !!link.lastPollAt && Date.now() - link.lastPollAt <= 2000 }, history };
+    if (message.action === 'status') return { mode, broker: policy.broker, accountType: policy.accountType, symbol: policy.symbol, charts: policy.charts, target: target.id, quantities, pending: queue.pending, blocked: queue.blocked, link: { ...link, healthy: link.connected && !!link.lastPollAt && Date.now() - link.lastPollAt <= 2000 }, history };
     if (message.action !== 'order') throw new Error('Expected status or order');
     return execute(message.request);
   };
@@ -223,6 +241,7 @@ export async function serve({ mode, allowLive = false, quantities = [4, 3, 2, 1]
       if (response.exceptionDetails || !response.result?.value) throw new Error('Chart outbox unavailable');
       link.connected = true; link.lastPollAt = Date.now(); link.error = null;
       if (!response.result.value.installed) {
+        await sessionSnapshot(c); // Restore the modern Replay controller after navigation.
         const installed = await c.Runtime.evaluate({ expression: source, returnByValue: true });
         if (installed.exceptionDetails) throw new Error('Could not restore the chart key handler');
       } else {

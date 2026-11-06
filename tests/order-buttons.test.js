@@ -38,9 +38,9 @@ function fixture(options = {}) {
       return undefined; // Desktop adapter can return no ID; read-back must work.
     },
   };
-  const trading = { activeBroker: () => broker, isInReplay: () => ({ value: () => !!options.inReplay }), linking: () => ({ value: () => ({ symbol: policy.symbol }) }), getActualSymbol: async symbol => ({ symbol }) };
+  const trading = { activeBroker: () => broker, isInReplay: () => ({ value: () => !!options.inReplay }), linking: () => ({ value: () => ({ symbol: policy.symbol }) }), getActualSymbol: async symbol => ({ symbol: options.symbolMap?.[symbol] || symbol }) };
   const replay = { isReplayStarted: () => ({ value: () => options.replayStarted !== false }), currentDate: () => ({ value: () => options.replayTime ?? 1700000000 }) };
-  const fn = vm.runInNewContext(`(${orderInPage.toString()})`, { window: { TradingViewApi: { _tradingService: { trading: () => trading }, _replayApi: replay } }, performance, Date, setTimeout });
+  const fn = vm.runInNewContext(`(${orderInPage.toString()})`, { window: { TradingViewApi: { _chartWidgetCollection: { getAll: () => options.chartWidgets || [] }, _tradingService: { trading: () => trading }, _replayApi: options.modernReplay ? null : replay, _loadReplayController: async () => ({ controller: { isReplayStarted: replay.isReplayStarted, replayCurrentDate: replay.currentDate } }) } }, performance, Date, setTimeout });
   return { run: (r, p = policy) => fn(r, p), calls, orders, cancellations };
 }
 
@@ -352,3 +352,89 @@ test('launcher times out without guessing a hidden destination', async () => {
   await assert.rejects(waitForOrderTarget(async () => { throw new Error('No connected chart tab matches the requested execution mode'); },
     { timeoutMs: 1000, now: () => clock, pause: async () => { clock += 500; } }), /Bring TradingView/);
 });
+
+
+function multiChartCaptureFixture() {
+  const listeners = new Map();
+  const chart = (id, symbol, left, base) => {
+    const series = { symbol: () => symbol, firstValue: () => 1, priceScale: () => ({ coordinateToPrice: y => base + y }) };
+    const pane = { state: () => ({ dataSources: () => [series] }), height: () => 500,
+      canvasElement: () => ({ getBoundingClientRect: () => ({ left, right: left + 400, top: 0, bottom: 500, height: 500 }) }) };
+    return { id: () => id, model: () => ({ mainSeries: () => series }), paneWidgets: () => [pane] };
+  };
+  const charts = [chart('left', 'MNQ', 0, 20000), chart('right', 'MES', 500, 6000)];
+  const document = { body: {}, getElementById: () => null, hasFocus: () => true, visibilityState: 'visible', activeElement: null,
+    addEventListener: (name, handler) => listeners.set(name, handler), removeEventListener: () => {} };
+  const trading = { activeBroker: () => ({ metainfo: () => ({ id: 'Paper' }) }), linking: () => ({ value: () => ({ symbol: 'MNQ' }) }) };
+  const window = { addEventListener: () => {}, removeEventListener: () => {}, TradingViewApi: {
+    _chartWidgetCollection: { getAll: () => charts }, _activeChartWidgetWV: { value: () => ({ _chartWidget: charts[0] }) },
+    _tradingService: { trading: () => trading } } };
+  const install = vm.runInNewContext(`(${installKeys.toString()})`, { window, document, Date, crypto: { randomUUID: () => 'hover' } });
+  install('connected', [4, 3, 2, 1], 'owner', 'Paper Trading');
+  return { capture: (x, y) => { listeners.get('pointermove')({ isTrusted: true, clientX: x, clientY: y }); return window.__tvOrderButtons.capture(); } };
+}
+test('cursor capture chooses the hovered chart, symbol and price scale without clicking it', () => {
+  const f = multiChartCaptureFixture();
+  const right = f.capture(600, 100);
+  assert.equal(right.chartSymbol, 'MES');
+  assert.equal(right.chartId, 'right');
+  assert.equal(right.price, 6100);
+  const left = f.capture(100, 200);
+  assert.equal(left.chartSymbol, 'MNQ');
+  assert.equal(left.price, 20200);
+  assert.throws(() => f.capture(450, 100), /cursor over/);
+});
+
+
+test('orders from a registered inactive chart use that chart symbol rather than last active chart', async () => {
+  const widget = { id: () => 'right', model: () => ({ mainSeries: () => ({ symbol: () => 'CME_MINI:MNQ1!' }) }) };
+  const f = fixture({ chartWidgets: [widget] });
+  const p = { ...policy, charts: [
+    { id: 'left', chartSymbol: policy.symbol, symbol: policy.symbol },
+    { id: 'right', chartSymbol: 'CME_MINI:MNQ1!', symbol: 'CME_MINI:MNQ1!' },
+  ] };
+  const result = await f.run(request({ chartId: 'right', chartSymbol: 'CME_MINI:MNQ1!' }), p);
+  assert.equal(result.verified, true);
+  assert.equal(f.calls[0].symbol, 'CME_MINI:MNQ1!');
+  await assert.rejects(f.run(request({ chartId: 'right', chartSymbol: 'CME_MINI:MNQ1!' }), { ...p, charts: [p.charts[0]] }), /not registered/);
+  await assert.rejects(f.run(request({ chartId: 'missing' }), p), /layout changed/);
+  assert.equal(f.calls.length, 1);
+});
+test('changing a registered chart symbol rejects a queued request before submission', async () => {
+  const widget = { id: () => 'right', model: () => ({ mainSeries: () => ({ symbol: () => 'CHANGED' }) }) };
+  const f = fixture({ chartWidgets: [widget] });
+  await assert.rejects(f.run(request({ chartId: 'right' }), { ...policy, charts: [{ id: 'right', chartSymbol: policy.symbol, symbol: policy.symbol }] }), /Chart changed/);
+  assert.equal(f.calls.length, 0);
+});
+
+
+test('modern Replay controller validates historical timestamp without the retired _replayApi', async () => {
+  const f = fixture({ ...replayOptions, modernReplay: true, staleReplayCache: true });
+  const result = await f.run(replayRequest(), replayPolicy);
+  assert.equal(result.verified, true);
+  assert.equal(f.calls.length, 1);
+});
+
+
+for (const [brokerId, brokerName, accountType] of [
+  ['Paper', 'Paper Trading', 'demo'], ['WEBULL', 'Webull', 'live'],
+  ['TRADESTATION', 'TradeStation', 'demo'], ['TRADESTATION', 'TradeStation', 'live'],
+]) {
+  test(`two-chart routing verifies every size/type on ${brokerName} ${accountType}`, async () => {
+    const symbols = ['CME_MINI:MES1!', 'CME_MINI:MNQ1!'];
+    const symbolMap = brokerId === 'Paper' ? {} : { [symbols[0]]: 'CME_MINI:MESZ2026', [symbols[1]]: 'CME_MINI:MNQZ2026' };
+    const charts = symbols.map((symbol, i) => ({ id: () => String(i), model: () => ({ mainSeries: () => ({ symbol: () => symbol }) }) }));
+    const registered = symbols.map((chartSymbol, i) => ({ id: String(i), chartSymbol, symbol: symbolMap[chartSymbol] || chartSymbol }));
+    const f = fixture({ brokerId, title: brokerName, accountType, symbolMap, chartWidgets: charts });
+    const p = { ...policy, mode: 'connected', brokerId, broker: brokerName, accountType, allowLive: true, charts: registered };
+    for (const ch of registered) for (const side of ['buy', 'sell']) for (const type of ['limit', 'stop']) for (const quantity of [4, 3, 2, 1]) {
+      const price = (side === 'buy') === (type === 'stop') ? 8000 : 7500;
+      const result = await f.run(request({ chartId: ch.id, chartSymbol: ch.chartSymbol, side, type, quantity, price }), p);
+      assert.equal(result.verified, true);
+      assert.equal(result.symbol, ch.symbol);
+      assert.equal(f.calls.at(-1).symbol, ch.symbol);
+      assert.equal(f.calls.at(-1).qty, quantity);
+    }
+    assert.equal(f.calls.length, 32);
+  });
+}

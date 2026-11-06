@@ -231,7 +231,9 @@ export function placeLabels(plan, geometry, {maxVisits=50000,searches,fontSize=F
     function choose(depth) {
       if(depth===order.length)return true;
       if(++visits>maxVisits)return false;
-      const fits=note=>!chosen.some(other=>leadersIntersect(note.anchor,note.label,other.anchor,other.label)||intersects(note.bounds,other.bounds)||
+      const fits=note=>!chosen.some(other=>((note.anchor.x===other.anchor.x&&note.anchor.y===other.anchor.y)
+        ? Math.abs((note.label.x-note.anchor.x)*(other.label.y-other.anchor.y)-(note.label.y-note.anchor.y)*(other.label.x-other.anchor.x))<1e-7
+        : leadersIntersect(note.anchor,note.label,other.anchor,other.label))||intersects(note.bounds,other.bounds)||
           segmentIntersectsBox(note.anchor,note.label,other.bounds)||
           segmentIntersectsBox(other.anchor,other.label,note.bounds));
       let index=order[depth].index, available;

@@ -5,6 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { start, step, autoplay, stop, trade, status, VALID_AUTOPLAY_DELAYS } from '../src/core/replay.js';
 
 // ── Mock helpers ─────────────────────────────────────────────────────────
@@ -322,6 +323,32 @@ describe('trade()', () => {
 // ── status() ─────────────────────────────────────────────────────────────
 
 describe('status()', () => {
+  it('reads modern Replay status when the legacy API is unavailable', async () => {
+    const report = { position: { qty: 0 }, performance: { all: { netProfit: 570 } } };
+    const controller = {
+      isReplayStarted: () => ({ value: () => true }),
+      isAutoplayStarted: () => ({ value: () => false }),
+      replayCurrentDate: () => ({ value: () => 1785947639 }),
+      autoplayDelay: () => 100,
+      replayAvailability: () => new Map([['active', { isAvailable: true }]]),
+      tradingUIController: () => ({ replayStrategyFacadesPerChartModelId: () => new Map([['active', { reportData: () => report }]]) }),
+    };
+    const evaluate = async (expression, options) => {
+      assert.equal(options.awaitPromise, true);
+      return vm.runInNewContext(expression, { window: { TradingViewApi: {
+        _activeChartWidgetWV: { value: () => ({ _chartWidget: { model: () => ({ id: () => 'active' }) } }) },
+        _loadReplayController: async () => ({ controller }),
+      } } });
+    };
+    const getReplayApi = async () => { throw Error('Replay API not available at window.TradingViewApi._replayApi'); };
+    const result = await status({ _deps: { evaluate, getReplayApi } });
+    assert.equal(result.is_replay_started, true);
+    assert.equal(result.is_autoplay_started, false);
+    assert.equal(result.current_date, 1785947639);
+    assert.equal(result.position, 0);
+    assert.equal(result.realized_pnl, 570);
+    await assert.rejects(status({ _deps: { evaluate: () => assert.fail('Do not mask connection failures'), getReplayApi: async () => { throw Error('Connection lost'); } } }), /Connection lost/);
+  });
   it('returns full status object', async () => {
     let callIdx = 0;
     const evaluate = async (expr) => {

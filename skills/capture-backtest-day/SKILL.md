@@ -5,6 +5,10 @@ description: Capture TradingView backtest trades and screenshots, release the ch
 
 # Capture Backtest Day
 
+For captures and saved-pack continuations, follow the shared
+[chat-title step](/Users/utsav/Projects/tradingview-mcp/workflows/capture-chat-title.md)
+once the trading date and ticker are known.
+
 ## Replay capture from transactions — user update 2026-10-22
 
 New replay captures generate their own position tools from the paused replay
@@ -45,6 +49,12 @@ Keep unfinished packs for recovery; delete completed packs only after API verifi
 
 Operate in `/Users/utsav/Projects/tradingview-mcp`. Read and follow
 [the maintained workflow](/Users/utsav/Projects/tradingview-mcp/workflows/capture-backtest-day.md).
+
+For MES/MNQ costs, follow the maintained workflow's **MES and MNQ simulated
+fees** section: apply and verify modeled per-contract fees in the trading app
+from captured transactions, preserve the unchanged TradingView report, and
+verify saved net P/L. TradingView commission settings are not a prerequisite.
+Existing sealed packs require an explicit amendment rather than a silent rewrite.
 
 User update, 2026-10-25: after collecting notes, automatically review the existing
 checklist against the supplied notes, reconciled fills and frozen charts. Reuse

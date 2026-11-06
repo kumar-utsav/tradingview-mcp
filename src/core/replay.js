@@ -164,7 +164,31 @@ export async function trade({ action, _deps }) {
 
 export async function status({ _deps } = {}) {
   const { evaluate, getReplayApi } = _resolve(_deps);
-  const rp = await getReplayApi();
+  let rp;
+  try {
+    rp = await getReplayApi();
+  } catch (error) {
+    if (!error.message?.startsWith('Replay API not available at ')) throw error;
+    return evaluate(`(async () => {
+      const api = window.TradingViewApi;
+      const r = (await api._loadReplayController?.())?.controller;
+      if (!r) throw Error('Replay controller unavailable; replay state could not be determined');
+      const unwrap = v => v && typeof v.value === 'function' ? v.value() : v;
+      const chartId = api._activeChartWidgetWV.value()._chartWidget.model().id();
+      const report = r.tradingUIController()?.replayStrategyFacadesPerChartModelId()?.get(chartId)?.reportData();
+      return {
+        success: true,
+        is_replay_available: r.replayAvailability().get(chartId)?.isAvailable ?? null,
+        is_replay_started: unwrap(r.isReplayStarted()),
+        is_autoplay_started: unwrap(r.isAutoplayStarted()),
+        replay_mode: null,
+        current_date: unwrap(r.replayCurrentDate()),
+        autoplay_delay: unwrap(r.autoplayDelay()),
+        position: report?.position?.qty ?? null,
+        realized_pnl: report?.performance?.all?.netProfit ?? null,
+      };
+    })()`, { awaitPromise: true });
+  }
   const st = await evaluate(`
     (function() {
       var r = ${rp};

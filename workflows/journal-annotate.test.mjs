@@ -334,3 +334,15 @@ test('winning partial exits target the farthest actual exit but span through the
   assert.equal(plan.mfe.price,long?110:90);
  }
 });
+
+test('separate fills at the same exact anchor retain distinct clear labels',()=>{
+  const geometry={width:900,height:600,bars:Array.from({length:80},(_,i)=>({time:t(i),x:30+i*10,highY:200,lowY:260,openY:220,closeY:240}))};
+  const fills=[0,1].map(transaction_index=>({transaction_index,time:t(30),anchor_y:230,side:'SELL',text:'SELL 1 @ $7749.25'}));
+  const labels=placeLabels({id:2,fills},geometry);
+  assert.equal(labels.length,2);
+  assert.deepEqual(labels[0].anchor,labels[1].anchor);
+  assert.notDeepEqual(labels[0].label,labels[1].label);
+  const [a,b]=labels;
+  assert.ok(a.bounds.right<b.bounds.left||b.bounds.right<a.bounds.left||a.bounds.bottom<b.bounds.top||b.bounds.bottom<a.bounds.top);
+  assert.ok(Math.abs((a.label.x-a.anchor.x)*(b.label.y-b.anchor.y)-(a.label.y-a.anchor.y)*(b.label.x-b.anchor.x))>1e-7);
+});

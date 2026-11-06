@@ -163,6 +163,38 @@ test('default replay capture generates one journal-style tool per opening fill w
  }
 });
 
+test('new app-fee captures publish modeled costs and verify the untouched source report',async t=>{
+ const {publishNotes}=await import('./backtest-notes.mjs');
+ const {applyReplayFeeModel,buildReplayLedger}=await import('../src/core/replay-capture.js');
+ const oldToken=process.env.TRADINGVIEW_INGESTION_TOKEN,oldBase=process.env.TRADING_BACKEND_URL;
+ process.env.TRADINGVIEW_INGESTION_TOKEN='fixture';process.env.TRADING_BACKEND_URL='http://fixture';
+ t.after(()=>{for(const [k,v] of [['TRADINGVIEW_INGESTION_TOKEN',oldToken],['TRADING_BACKEND_URL',oldBase]]){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+ const f=await setup(t);f.deps.preflight=async()=>({ready:true,capabilities:{modeled_replay_fees:true}});
+ await freezeReplayDay('2026-09-01',f.directory,{grouping:'flat_to_flat',automaticPositions:false,deps:f.deps,notesOnly:true});
+ const frozen=JSON.parse(await fs.readFile(path.join(f.directory,'frozen.json')));
+ assert.ok(frozen.fee_model);assert.equal(frozen.ledger.net_pnl,297.5);
+ const expected=applyReplayFeeModel(buildReplayLedger(f.snapshot,'2026-09-01'),frozen.fee_model),records=[];
+ const input=path.join(f.directory,'notes-input.json');await fs.writeFile(input,JSON.stringify({date:'2026-09-01',user_finished:true,trades:expected.trades.map((t,i)=>({number:i+1,source_id:t.source_id,text:'Supplied note.'}))}));
+ let feeSupport=false,posted=0;
+ const request=async(url,options={})=>{
+  const route=new URL(url).pathname;let value;
+  if(route.endsWith('/registry'))value={ready:true,capabilities:{replay_fills:true,replay_entries:true,modeled_replay_fees:feeSupport}};
+  else if(route==='/ingestion/backtest/replay'){
+   posted++;const body=JSON.parse(options.body);assert.deepEqual(body.source_snapshot,f.snapshot);assert.deepEqual(body.fee_model,frozen.fee_model);
+   records.push(...expected.trades.map((t,i)=>({id:i+1,tradingview_source_id:t.source_id,rr:null,notes:'',tags:[],setup_outcome:t.outcome,replay_execution:{...t,fee_model:expected.fee_model,source_report:f.snapshot.report}})));value={records};
+  } else if(route==='/backtest/')value=records;
+  else if(route==='/backtest/daily-notes')value=[];
+  else if(route.endsWith('/image'))value={chart:(await fs.readFile(path.join(f.directory,`position-${Number(route.split('/')[2])}.png`))).toString('base64')};
+  else if(options.method==='PUT'){const body=JSON.parse(options.body);records.find(r=>r.id===Number(route.split('/')[2]))[body.propName]=body.value;value={};}
+  else throw Error('Unexpected route '+route);
+  return {ok:true,headers:{get:()=>null},json:async()=>JSON.parse(JSON.stringify(value))};
+ };
+ await assert.rejects(publishNotes(f.directory,input,{base:'http://fixture',request}),/not supported/);assert.equal(posted,0);
+ feeSupport=true;const result=await publishNotes(f.directory,input,{base:'http://fixture',request});
+ assert.equal(result.net_pnl,275.6);assert.equal(result.modeled_fees_verified,true);assert.equal(posted,1);
+ assert.equal(records.reduce((n,r)=>n+r.replay_execution.commission,0),21.9);
+});
+
 test('automatic annotation failure never seals a released replay pack',async t=>{
  const f=await setup(t);f.deps.captureAnnotations=async()=>{throw Error('Generated tool cleanup failed');};
  await assert.rejects(freezeReplayDay('2026-09-01',f.directory,{deps:f.deps,notesOnly:true}),/cleanup failed/);

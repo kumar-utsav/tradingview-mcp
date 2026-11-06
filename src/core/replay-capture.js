@@ -4,17 +4,26 @@ import {fileURLToPath} from 'node:url';
 const require=createRequire(import.meta.url);
 const tradingRoot=process.env.TRADING_PROJECT_ROOT||path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../trading');
 export const {buildReplayLedger,ledgerByEntry,splitReplayPosition,pacific}=require(path.join(tradingRoot,'backend/utils/replayLedger.js'));
+export const {applyReplayFeeModel,REPLAY_FEE_MODEL}=require(path.join(tradingRoot,'backend/utils/replayFees.js'));
 
 // Read the active chart's replay facade, never a broker connection or another pane.
-export const replaySnapshotExpression = `(() => {
-  const api=window.TradingViewApi, chart=api._activeChartWidgetWV.value(), replay=api._replayApi;
+export const replaySnapshotExpression = `(async () => {
+  const api=window.TradingViewApi, chart=api._activeChartWidgetWV.value();
+  // New Replay keeps its controller separate from the retired public API.
+  // Loading the existing controller does not start, step or reset the session.
+  const legacy=api._replayApi;
+  const replay=legacy || (await api._loadReplayController?.())?.controller;
   const unwrap=x=>x&&typeof x.value==='function'?x.value():x;
+  if(!replay) throw Error('Replay controller unavailable; replay state could not be determined');
   if(!unwrap(replay.isReplayStarted())||unwrap(replay.isAutoplayStarted())) throw Error('Pause an active replay before capturing');
-  const facade=replay.replayStrategyFacade(), report=facade&&facade.reportData();
+  // Scope the ledger to this chart model, never another pane's active facade.
+  const facade=legacy ? replay.replayStrategyFacade()
+    : replay.tradingUIController()?.replayStrategyFacadesPerChartModelId()?.get(chart._chartWidget.model().id());
+  const report=facade&&facade.reportData();
   if(!report||!Array.isArray(report.filledOrders)) throw Error('Replay filled-order report unavailable');
   const info=chart._chartWidget.model().mainSeries().symbolInfo();
   return {source:location.pathname,symbol:chart.symbolExt().full_name||chart.symbolExt().symbol,
-    resolution:String(chart.resolution()),replay_time:unwrap(replay.currentDate()),
+    resolution:String(chart.resolution()),replay_time:unwrap(legacy ? replay.currentDate() : replay.replayCurrentDate()),
     instrument:{type:info.type,tick_size:info.minmov/info.pricescale,point_value:info.pointvalue,
       currency:info.currency_code,timezone:info.timezone,session:info.session},
     report:{...report,position:{...report.position,

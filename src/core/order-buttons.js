@@ -47,6 +47,7 @@ export async function orderInPage(request, policy) {
   if (!broker) throw new Error('No connected broker');
   const identity = () => ({ id: broker.metainfo().id, title: broker.metainfo().title, account: String(broker.currentAccount()), accountType: broker.currentAccountType() });
   const original = identity();
+  const replayApi = window.TradingViewApi._replayApi || (original.id === 'REPLAYBROKER' ? (await window.TradingViewApi._loadReplayController?.())?.controller : null);
   const replayDestination = policy.mode === 'replay' || (policy.mode === 'connected' && policy.brokerId === 'REPLAYBROKER');
   const assertDestination = () => {
     const current = identity();
@@ -63,9 +64,9 @@ export async function orderInPage(request, policy) {
     }
     if (replayDestination) {
       if (!inReplay || current.id !== 'REPLAYBROKER' || current.accountType !== 'demo') throw new Error('Replay mode requires the active Replay Broker');
-      const api = window.TradingViewApi._replayApi;
+      const api = replayApi;
       const started = api?.isReplayStarted();
-      const replayTime = api?.currentDate();
+      const replayTime = api?.currentDate?.() ?? api?.replayCurrentDate?.();
       const date = typeof replayTime?.value === 'function' ? replayTime.value() : replayTime;
       if (!(typeof started?.value === 'function' ? started.value() : started) || !Number.isFinite(date)) throw new Error('Start Replay before placing replay orders');
       if (!policy.replaySession || broker.sessionId() !== policy.replaySession || request.replaySession !== policy.replaySession) throw new Error('Replay session changed; restart the Replay order service');
@@ -115,11 +116,21 @@ export async function orderInPage(request, policy) {
       return { ...common, submitted: null, attempted, uncertain: true, error: 'Cancellation outcome unknown; inspect broker orders: ' + error.message };
     }
   }
-  const chartSymbol = trading.linking().value().symbol;
+  const readChartSymbol = () => {
+    if (!request.chartId) return trading.linking().value().symbol;
+    const chart = window.TradingViewApi._chartWidgetCollection?.getAll?.().find(chart => String(chart.id()) === request.chartId);
+    if (!chart) throw new Error('Chart layout changed; restart the order service');
+    return chart.model().mainSeries().symbol();
+  };
+  const chartSymbol = readChartSymbol();
   if (chartSymbol !== request.chartSymbol) throw new Error('Chart changed after the key press');
+  const registered = policy.charts?.length
+    ? policy.charts.find(chart => chart.chartSymbol === chartSymbol && (!request.chartId || chart.id === request.chartId))
+    : { symbol: policy.symbol };
+  if (!registered) throw new Error('Chart was not registered at startup; restart the order service');
   const resolved = await trading.getActualSymbol(chartSymbol);
   const symbol = resolved.symbol;
-  if (symbol !== policy.symbol) throw new Error('Tradable symbol changed: ' + symbol);
+  if (symbol !== registered.symbol) throw new Error('Tradable symbol changed: ' + symbol);
   const [info, quotes] = await Promise.all([broker.symbolInfo(symbol), broker.quotesSnapshot(symbol)]);
   const tick = info.minTick;
   if (!Number.isFinite(tick) || tick <= 0 || info.variableMinTick) throw new Error('Unsupported or missing tick size');
@@ -136,12 +147,14 @@ export async function orderInPage(request, policy) {
   const prepared = await broker.createInitialPreOrder(order);
   if (prepared.symbol !== symbol || prepared.qty !== request.quantity || prepared.type !== (request.type === 'limit' ? 1 : 3) || prepared.side !== (request.side === 'buy' ? 1 : -1) || prepared[request.type === 'limit' ? 'limitPrice' : 'stopPrice'] !== price || prepared.parentId != null || prepared.id != null || prepared.isClose || prepared.stopLoss != null || prepared.takeProfit != null || prepared.exitLevels?.length) throw new Error('Broker defaults changed the requested independent order');
   assertDestination();
+  if (readChartSymbol() !== request.chartSymbol) throw new Error('Chart changed after the key press');
   if (Date.now() - request.capturedAt > 5000) throw new Error('Order preparation took too long; nothing submitted');
   const common = { mode: policy.mode, broker: original.title, symbol, side: request.side, type: request.type, quantity: request.quantity, price };
   if (policy.mode === 'dry-run') return { ...common, submitted: false, verified: true, totalMs: performance.now() - started };
   const beforeOrders = await readOrders();
   const beforeIds = new Set(beforeOrders.map(item => String(item.id)));
   assertDestination();
+  if (readChartSymbol() !== request.chartSymbol) throw new Error('Chart changed after the key press');
   if (Date.now() - request.capturedAt > 5000) throw new Error('Order preparation took too long; nothing submitted');
   let response;
   try {

@@ -5,6 +5,10 @@ description: Capture one chart per imported journal trade with native tool RR, r
 
 # Capture Journal
 
+For captures and saved-pack continuations, follow the shared
+[chat-title step](/Users/utsav/Projects/tradingview-mcp/workflows/capture-chat-title.md)
+once the trading date and ticker are known.
+
 Create new capture runs under `/Users/utsav/Projects/tradingview-mcp/captures/journal/YYYY-MM-DD-run-id/`.
 Never create capture folders, screenshots, notes or audit files on the Desktop.
 Keep unfinished packs for recovery; delete completed packs only after API verification.

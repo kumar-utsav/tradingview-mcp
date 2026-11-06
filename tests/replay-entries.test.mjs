@@ -18,7 +18,24 @@ test('replay snapshot reads flat-position conversion rate from serviceInfo witho
  const chart={symbolExt:()=>({full_name:'CME_MINI:MES1!'}),resolution:()=>1,_chartWidget:{model:()=>({mainSeries:()=>({symbolInfo:()=>({type:'futures',minmov:1,pricescale:4,pointvalue:5,currency_code:'USD'})})})}};
  const replay={isReplayStarted:()=>true,isAutoplayStarted:()=>false,currentDate:()=>1,replayStrategyFacade:()=>({reportData:()=>report,recoveryState:()=>({})})};
  const run=()=>vm.runInNewContext(replaySnapshotExpression,{window:{TradingViewApi:{_activeChartWidgetWV:{value:()=>chart},_replayApi:replay}},location:{pathname:'/chart/test'}});
- assert.equal(run().report.position.symbolToAccountRate,1);assert.equal(run().rate_source,'serviceInfo');assert.equal(report.position.symbolToAccountRate,undefined);
- report.position.symbolToAccountRate=2;assert.equal(run().report.position.symbolToAccountRate,2);
- delete report.position.symbolToAccountRate;delete report.serviceInfo.symbolToAccountRate;assert.equal(run().report.position.symbolToAccountRate,undefined);
+ assert.equal((await run()).report.position.symbolToAccountRate,1);assert.equal((await run()).rate_source,'serviceInfo');assert.equal(report.position.symbolToAccountRate,undefined);
+ report.position.symbolToAccountRate=2;assert.equal((await run()).report.position.symbolToAccountRate,2);
+ delete report.position.symbolToAccountRate;delete report.serviceInfo.symbolToAccountRate;assert.equal((await run()).report.position.symbolToAccountRate,undefined);
+});
+
+test('modern replay capture resolves the paused active chart facade when the legacy API is null',async()=>{
+ const {replaySnapshotExpression}=await import('../src/core/replay-capture.js');
+ const vm=await import('node:vm');
+ const report={position:{qty:0},filledOrders:[{id:'active-chart-fill'}],serviceInfo:{symbolToAccountRate:1}};
+ const model={id:()=> 'active-model',mainSeries:()=>({symbolInfo:()=>({type:'futures',minmov:1,pricescale:4,pointvalue:5,currency_code:'USD'})})};
+ const chart={symbolExt:()=>({full_name:'CME_MINI:MES1!'}),resolution:()=>2,_chartWidget:{model:()=>model}};
+ let started=true,autoplay=false,facadeAvailable=true;
+ const facade={reportData:()=>report,recoveryState:()=>({saved:true})};
+ const controller={isReplayStarted:()=>({value:()=>started}),isAutoplayStarted:()=>({value:()=>autoplay}),replayCurrentDate:()=>({value:()=>123}),
+   tradingUIController:()=>({replayStrategyFacadesPerChartModelId:()=>new Map(facadeAvailable?[['other-model',{reportData:()=>assert.fail('wrong chart')}],['active-model',facade]]:[['other-model',facade]])})};
+ const run=()=>vm.runInNewContext(replaySnapshotExpression,{window:{TradingViewApi:{_activeChartWidgetWV:{value:()=>chart},_replayApi:null,_loadReplayController:async()=>({controller})}},location:{pathname:'/chart/modern'}});
+ const snapshot=await run();assert.equal(snapshot.report.filledOrders[0].id,'active-chart-fill');assert.equal(snapshot.replay_time,123);assert.equal(snapshot.instrument.tick_size,.25);
+ autoplay=true;await assert.rejects(async()=>run(),/Pause an active replay/);autoplay=false;
+ started=false;await assert.rejects(async()=>run(),/Pause an active replay/);started=true;
+ facadeAvailable=false;await assert.rejects(async()=>run(),/filled-order report unavailable/);
 });

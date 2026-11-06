@@ -1,5 +1,8 @@
 # Capture backtest day
 
+For captures and saved-pack continuations, follow the shared
+[chat-title step](capture-chat-title.md) once the trading date and ticker are known.
+
 New run files belong under `/Users/utsav/Projects/tradingview-mcp/captures/backtest/YYYY-MM-DD-run-id/`.
 Never create capture folders or files on the Desktop. Keep pending packs here
 for recovery; put disposable audits/scripts in the OS temporary directory.
@@ -46,6 +49,38 @@ Questionnaires and research comparisons remain excluded. An explicit notes-only
 or no-checklist request skips checklist selection. Journal capture uses the same checklist behavior as of 2026-10-26.
 
 ## 1. Capture and release TradingView
+
+### MES and MNQ simulated fees — user update 2026-11-05
+
+Use **$0.73 USD per contract per side** for new MES and MNQ replay
+backtests, including dated contracts and continuous symbols. This is the total
+modeled transaction cost (commission plus other execution fees), not an
+additional charge on top of replay commissions. The rate was verified against
+all 38 imported MES journal trades (106 fills) and Webull's MNQ order-ticket
+estimate for one contract without attached exits. Other instruments require
+their own verified rate; do not generalize this rate to every micro future.
+
+User correction, 2026-11-05: calculate these fees in the trading app from the
+captured TradingView transactions. Preserve the original report unchanged;
+TradingView commission configuration is not a capture prerequisite. The app's
+modeled costs replace reported replay costs rather than adding a second charge.
+Each saved closed FIFO lot must have
+`commission = quantity × 2 × 0.73` and
+`net_pnl = gross_pnl - commission`, rounded to cents. Sum lots once per opening
+fill, including adds and allocated partial exits. Four contracts opened and
+fully closed cost $5.84, regardless of the number of exit orders. Use the
+fee-adjusted net result for saved outcomes; actual captured ticks stay based on
+prices alone. Read back commissions and gross/net P/L with execution facts.
+
+Require `modeled_replay_fees:true` in the app's capture-notes registry before
+publishing a modeled-cost capture. New packs record a stable `fee_model` request;
+the ingestion backend independently derives fees and saves the original report,
+original execution and modeled-cost provenance. Verify fill fees, each lot,
+entry/position totals and fee-adjusted outcomes through API read-back.
+An older sealed pack requires an explicitly authorized `fee-amendment.json`
+that identifies its unchanged original snapshot hash and stable fee model.
+Keep historical records unchanged unless their amendment is explicitly requested.
+Finish from the saved pack after chart release.
 
 Run the read-only backend readiness check before chart access:
 `node --input-type=module --env-file=.env -e "import {preflightNotes} from './workflows/capture-notes.mjs'; console.log(await preflightNotes('backtest'))"`.
