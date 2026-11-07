@@ -156,12 +156,58 @@ export async function orderInPage(request, policy) {
   assertDestination();
   if (readChartSymbol() !== request.chartSymbol) throw new Error('Chart changed after the key press');
   if (Date.now() - request.capturedAt > 5000) throw new Error('Order preparation took too long; nothing submitted');
-  let response;
-  try {
-    response = await broker.placeOrder(prepared);
-  } catch (error) {
-    return { ...common, submitted: null, uncertain: true, error: 'Submission outcome unknown; inspect broker orders before retrying: ' + error.message };
+  let response, submissionFailure, thrown;
+  let restore = () => {};
+  // The facade swallows broker rejections and returns false. Observe only the
+  // transport promise for this exact order object, preserving native notifications
+  // and avoiding attribution of unrelated manual-order errors to this request.
+  const connection = broker._brokerConnection;
+  if (typeof connection?.placeOrder === 'function') {
+    const originalPlace = connection.placeOrder;
+    const descriptor = Object.getOwnPropertyDescriptor(connection, 'placeOrder');
+    const observe = function (...args) {
+      let result;
+      try { result = originalPlace.apply(this, args); }
+      catch (error) { if (args[0] === prepared) submissionFailure = error; throw error; }
+      if (args[0] !== prepared) return result;
+      return Promise.resolve(result).catch(error => { submissionFailure = error; throw error; });
+    };
+    try {
+      Object.defineProperty(connection, 'placeOrder', { value: observe, writable: true, configurable: true });
+      restore = () => {
+        if (connection.placeOrder !== observe) return;
+        if (descriptor) Object.defineProperty(connection, 'placeOrder', descriptor);
+        else delete connection.placeOrder;
+      };
+    } catch { /* If observation is unavailable, retain conservative read-back. */ }
   }
+  try { response = await broker.placeOrder(prepared); }
+  catch (error) { submissionFailure ||= error; thrown = error; }
+  finally { restore(); }
+  const rejectionMessage = typeof submissionFailure === 'string' ? submissionFailure : submissionFailure?.message || '';
+  const causes = [];
+  for (let cause = submissionFailure, depth = 0; cause && depth < 5; cause = cause.cause, depth++) causes.push(cause);
+  // Classify system/transport failures, rather than maintaining a whitelist of
+  // business rejection messages. Errors come from this exact order's promise.
+  const systemFailure = causes.some(error => {
+    const status = Number(error?.statusCode ?? error?.status ?? error?.response?.status);
+    const text = [typeof error === 'string' ? error : error?.message, error?.code, error?.name].filter(Boolean).join(' ');
+    return status >= 500 || status === 408 || status === 429 ||
+      /NetworkError|TypeError|AbortError|TimeoutError|network|socket|timed?\s*out|timeout|connection\s*(?:lost|closed|reset|refused|failed|error)|failed to fetch|fetch failed|disconnected|service unavailable|internal server error|bad gateway|aborted|ECONN|ENOTFOUND|ETIMEDOUT/i.test(text);
+  });
+  if ((response === false || thrown) && rejectionMessage && !systemFailure) {
+    try {
+      assertDestination();
+      const currentOrders = await readOrders();
+      // A contradictory accepted order overrides a rejection-looking error.
+      const appeared = currentOrders.some(item => !beforeIds.has(String(item.id)) && item.symbol === symbol && item.qty === request.quantity && item.side === order.side && item.type === order.type && item[request.type === 'limit' ? 'limitPrice' : 'stopPrice'] === price);
+      if (!appeared) return { ...common, submitted: false, rejected: true, verified: true, uncertain: false,
+        error: rejectionMessage, totalMs: performance.now() - started };
+    } catch (error) {
+      return { ...common, submitted: null, uncertain: true, error: 'Cannot verify broker rejection; inspect orders before retrying: ' + error.message };
+    }
+  }
+  if (thrown || systemFailure) return { ...common, submitted: null, uncertain: true, error: 'Submission outcome unknown; inspect broker orders before retrying: ' + (rejectionMessage || thrown?.message || 'Connection failed') };
   const id = response?.orderId ? String(response.orderId) : null;
   // Read-back never retries a submission. A missing acknowledgement stops the
   // caller instead of risking a duplicate order.
@@ -174,6 +220,8 @@ export async function orderInPage(request, policy) {
     const actual = matches[0];
     if (actual && actual.status !== 4) {
       const verified = actual.symbol === symbol && actual.qty === request.quantity && actual.side === order.side && actual.type === order.type && actual[request.type === 'limit' ? 'limitPrice' : 'stopPrice'] === price;
+      if (actual.status === 5) return { ...common, id: String(actual.id), submitted: false, rejected: true, verified: true, uncertain: false, status: actual.status,
+        error: actual.message || actual.errorMessage || 'Broker rejected the order', totalMs: performance.now() - started };
       const accepted = actual.status === 6 || actual.status === 2;
       return { ...common, id: String(actual.id), submitted: true, verified: verified && accepted, uncertain: !verified, status: actual.status, ...(accepted ? {} : { error: 'Broker returned order status ' + actual.status }), totalMs: performance.now() - started };
     }

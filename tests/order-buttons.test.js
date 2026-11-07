@@ -32,16 +32,18 @@ function fixture(options = {}) {
       if (options.changeAccountOnCancel) options.account = 'changed-account';
     },
     placeOrder: async order => {
+      if (options.facadeRejects && order.qty === 4) return broker._brokerConnection.placeOrder(order).catch(() => false);
       calls.push({ ...order });
       if (options.throws) throw new Error('network lost');
-      orders.push({ ...order, id: String(orders.length + 1), status: 6 });
+      orders.push({ ...order, id: String(orders.length + 1), status: options.orderStatus || 6, message: options.orderMessage });
       return undefined; // Desktop adapter can return no ID; read-back must work.
     },
   };
+  if (options.facadeRejects) broker._brokerConnection.placeOrder = async order => { if (options.acceptBeforeError) orders.push({ ...order, id: 'accepted-despite-error', status: 6 }); throw Object.assign(new Error(options.facadeFailureMessage || 'Not enough buying power'), options.facadeErrorDetails); };
   const trading = { activeBroker: () => broker, isInReplay: () => ({ value: () => !!options.inReplay }), linking: () => ({ value: () => ({ symbol: policy.symbol }) }), getActualSymbol: async symbol => ({ symbol: options.symbolMap?.[symbol] || symbol }) };
   const replay = { isReplayStarted: () => ({ value: () => options.replayStarted !== false }), currentDate: () => ({ value: () => options.replayTime ?? 1700000000 }) };
   const fn = vm.runInNewContext(`(${orderInPage.toString()})`, { window: { TradingViewApi: { _chartWidgetCollection: { getAll: () => options.chartWidgets || [] }, _tradingService: { trading: () => trading }, _replayApi: options.modernReplay ? null : replay, _loadReplayController: async () => ({ controller: { isReplayStarted: replay.isReplayStarted, replayCurrentDate: replay.currentDate } }) } }, performance, Date, setTimeout });
-  return { run: (r, p = policy) => fn(r, p), calls, orders, cancellations };
+  return { run: (r, p = policy) => fn(r, p), calls, orders, cancellations, broker };
 }
 
 test('opposite-side and repeated orders retain each prior order with unique IDs', async () => {
@@ -438,3 +440,75 @@ for (const [brokerId, brokerName, accountType] of [
     assert.equal(f.calls.length, 32);
   });
 }
+
+
+test('explicit buying-power rejection permits the next smaller order without retrying the rejected one', async () => {
+  const f = fixture({ facadeRejects: true });
+  const queue = new OrderButtonQueue();
+  const originalTransport = f.broker._brokerConnection.placeOrder;
+  const rejected = await queue.enqueue({ ...request({ quantity: 4 }), id: 'too-large' }, r => f.run(r));
+  assert.equal(f.broker._brokerConnection.placeOrder, originalTransport, 'Temporary observer must be restored');
+  assert.equal(rejected.rejected, true);
+  assert.equal(rejected.submitted, false);
+  assert.equal(rejected.uncertain, false);
+  assert.equal(queue.blocked, false);
+  const smaller = await queue.enqueue({ ...request({ quantity: 3 }), id: 'smaller' }, r => f.run(r));
+  assert.equal(smaller.verified, true);
+  assert.equal(f.orders.length, 1);
+  assert.equal(f.orders[0].qty, 3);
+});
+
+
+test('a swallowed transport failure still blocks retries rather than assuming rejection', async () => {
+  const f = fixture({ facadeRejects: true, facadeFailureMessage: 'Network connection lost' });
+  const originalTransport = f.broker._brokerConnection.placeOrder;
+  const result = await f.run(request({ quantity: 4 }));
+  assert.equal(result.uncertain, true);
+  assert.equal(result.rejected, undefined);
+  assert.equal(f.broker._brokerConnection.placeOrder, originalTransport);
+  assert.equal(f.orders.length, 0);
+});
+
+
+for (const message of ['Market is closed', 'Invalid stop price', 'Order size exceeds account limit', 'Instrument not permitted for this account', 'Short selling is not allowed', 'Required order field is missing', 'Price outside permitted range', 'Order rejected by risk controls']) {
+  test(`broker rejection leaves shortcuts available: ${message}`, async () => {
+    const f = fixture({ facadeRejects: true, facadeFailureMessage: message });
+    const queue = new OrderButtonQueue();
+    const result = await queue.enqueue({ ...request({ quantity: 4 }), id: 'rejected' }, r => f.run(r));
+    assert.equal(result.rejected, true);
+    assert.equal(result.error, message);
+    assert.equal(queue.blocked, false);
+    const next = await queue.enqueue({ ...request({ quantity: 3 }), id: 'next' }, r => f.run(r));
+    assert.equal(next.verified, true);
+    assert.equal(f.orders.length, 1);
+  });
+}
+for (const details of [{ statusCode: 503 }, { code: 'ECONNRESET' }, { name: 'TypeError' }, { cause: new Error('Socket closed') }]) {
+  test(`system failure stays blocked: ${JSON.stringify(details)}`, async () => {
+    const f = fixture({ facadeRejects: true, facadeFailureMessage: 'Order failed', facadeErrorDetails: details });
+    const queue = new OrderButtonQueue();
+    const result = await queue.enqueue({ ...request({ quantity: 4 }), id: 'unknown' }, r => f.run(r));
+    assert.equal(result.uncertain, true);
+    assert.equal(queue.blocked, true);
+    assert.equal(f.orders.length, 0);
+  });
+}
+
+
+test('accepted order read-back overrides a rejection-looking transport error', async () => {
+  const f = fixture({ facadeRejects: true, facadeFailureMessage: 'Order rejected', acceptBeforeError: true });
+  const result = await f.run(request({ quantity: 4 }));
+  assert.equal(result.rejected, undefined);
+  assert.equal(result.submitted, true);
+  assert.equal(result.verified, true);
+  assert.equal(result.id, 'accepted-despite-error');
+  assert.equal(f.orders.length, 1);
+});
+test('explicit rejected order status does not latch the queue and retains broker error', async () => {
+  const f = fixture({ orderStatus: 5, orderMessage: 'Order rejected by exchange' });
+  const queue = new OrderButtonQueue();
+  const result = await queue.enqueue({ ...request(), id: 'rejected-status' }, r => f.run(r));
+  assert.equal(result.rejected, true);
+  assert.equal(result.error, 'Order rejected by exchange');
+  assert.equal(queue.blocked, false);
+});

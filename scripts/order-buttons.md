@@ -121,3 +121,9 @@ aliases, handler recovery and queued requests; preserves prior orders/positions
 and replay time; and cancels only test-created IDs. Generated reports go into a
 unique operating-system temporary directory, never into the checkout. Unit tests
 use fixtures and do not connect to TradingView or submit real orders.
+
+Explicit broker rejections (including buying power, price, quantity, permissions,
+market hours, or risk restrictions) are reported without blocking subsequent
+requests when the account and order connection remain verifiable. Sizes are never reduced automatically and orders are never
+retried automatically. Missing acknowledgements and transport failures continue
+to block the queue until the broker order state is checked.
