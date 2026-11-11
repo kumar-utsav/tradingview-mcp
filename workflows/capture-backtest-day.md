@@ -125,7 +125,16 @@ writes. Report skipped positions or capture failures; retain recovery files.
 
 ## 2. Collect concise notes from the saved pack
 
-Show fixed numbered trade mapping and Pacific entry/exit times. Ask for numbered
+Whenever showing capture results, including the notes handoff and final saved
+results, show each retained trade's signed net P&L in its row, with currency and
+two decimal places (for example, `+$320.41 USD` or `-$27.92 USD`). Each opening
+fill/add has its own FIFO-allocated P&L. Include the retained-trade total once.
+For modeled-fee captures, use the fee-adjusted net amount; before publication,
+label it as expected net after modeled fees, then use API-verified net after
+publication. Preserve the original replay report. If net P&L is unavailable,
+show `unavailable` with the reason instead of substituting gross P&L.
+
+Show fixed numbered trade mapping, Pacific entry/exit times and net P&L. Ask for numbered
 notes or explicit NO NOTE, then wait. Ordinary dictation is sufficient; do not
 require entry/risk/management questionnaires or emotion questions. Preserve raw
 dictation. Summarize each trade accurately in a few concise bullets or sentences,
@@ -172,7 +181,8 @@ success alone. Retain recovery and retry the same pack/key after a failure.
 Do not search/attach YouTube resources, perform app screen checks, export CSV
 backups, run restore tests, deploy or migrate. Preserve completed records in the
 trading app; clean disposable local audits after verification.
-Report verified trade count and notes saved, plus any actual unresolved limits.
+Report verified trade count, each trade's net P&L, the retained-trade net total
+and notes saved, plus any actual unresolved limits.
 
 
 ## 4. Review and save existing checklist selections

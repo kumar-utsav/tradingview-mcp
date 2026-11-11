@@ -10,7 +10,8 @@ import {summaryHtml,appendSummary} from './capture-notes.mjs';
 import {inspectPack} from './capture-review.mjs';
 import {publishReplayCapture} from '../src/core/trading-sync.js';
 import {cleanupCompletedPack} from './capture-cleanup.mjs';
-import {buildReplayLedger,ledgerByEntry,applyReplayFeeModel} from '../src/core/replay-capture.js';
+import {buildReplayLedger,ledgerByEntry} from '../src/core/replay-capture.js';
+import {expectedReplayFeeLedger} from '../src/core/replay-fee-expectations.js';
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const read=async p=>JSON.parse(await fs.readFile(p,'utf8'));
 export async function publishNotes(pack,inputFile,{base=process.env.TRADING_API_URL||process.env.TRADING_BACKEND_URL||'http://100.125.89.9:5555',request=fetch}={}){
@@ -26,7 +27,7 @@ export async function publishNotes(pack,inputFile,{base=process.env.TRADING_API_
  if(amendment && (amendment.user_authorized!==true || amendment.original_snapshot_sha256!==hash(await fs.readFile(path.join(pack,'replay-raw.json'))) || !amendment.fee_model))throw Error('Explicit fee amendment must match the sealed original snapshot');
  const feeModel=amendment?.fee_model || frozen.fee_model;
  if(feeModel && registry.capabilities?.modeled_replay_fees!==true)throw Error('App-side modeled replay fees are not supported by this backend; retain the pack');
- let expectedLedger=feeModel?applyReplayFeeModel(buildReplayLedger(sourceSnapshot,info.date),feeModel):frozen.ledger;
+ let expectedLedger=feeModel?expectedReplayFeeLedger(buildReplayLedger(sourceSnapshot,info.date),feeModel):frozen.ledger;
  if(frozen.ledger.grouping==='per_entry')expectedLedger=ledgerByEntry(expectedLedger);
  expectedLedger=JSON.parse(JSON.stringify(expectedLedger));
  if(frozen.ledger.grouping==='per_entry'&&registry.capabilities?.replay_entries!==true)throw Error('Entry-aware replay backend unavailable');

@@ -165,7 +165,8 @@ test('default replay capture generates one journal-style tool per opening fill w
 
 test('new app-fee captures publish modeled costs and verify the untouched source report',async t=>{
  const {publishNotes}=await import('./backtest-notes.mjs');
- const {applyReplayFeeModel,buildReplayLedger}=await import('../src/core/replay-capture.js');
+ const {buildReplayLedger}=await import('../src/core/replay-capture.js');
+ const {expectedReplayFeeLedger}=await import('../src/core/replay-fee-expectations.js');
  const oldToken=process.env.TRADINGVIEW_INGESTION_TOKEN,oldBase=process.env.TRADING_BACKEND_URL;
  process.env.TRADINGVIEW_INGESTION_TOKEN='fixture';process.env.TRADING_BACKEND_URL='http://fixture';
  t.after(()=>{for(const [k,v] of [['TRADINGVIEW_INGESTION_TOKEN',oldToken],['TRADING_BACKEND_URL',oldBase]]){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
@@ -173,7 +174,7 @@ test('new app-fee captures publish modeled costs and verify the untouched source
  await freezeReplayDay('2026-09-01',f.directory,{grouping:'flat_to_flat',automaticPositions:false,deps:f.deps,notesOnly:true});
  const frozen=JSON.parse(await fs.readFile(path.join(f.directory,'frozen.json')));
  assert.ok(frozen.fee_model);assert.equal(frozen.ledger.net_pnl,297.5);
- const expected=applyReplayFeeModel(buildReplayLedger(f.snapshot,'2026-09-01'),frozen.fee_model),records=[];
+ const expected=expectedReplayFeeLedger(buildReplayLedger(f.snapshot,'2026-09-01'),frozen.fee_model),records=[];
  const input=path.join(f.directory,'notes-input.json');await fs.writeFile(input,JSON.stringify({date:'2026-09-01',user_finished:true,trades:expected.trades.map((t,i)=>({number:i+1,source_id:t.source_id,text:'Supplied note.'}))}));
  let feeSupport=false,posted=0;
  const request=async(url,options={})=>{

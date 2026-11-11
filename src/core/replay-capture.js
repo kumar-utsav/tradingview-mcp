@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 const require=createRequire(import.meta.url);
 const tradingRoot=process.env.TRADING_PROJECT_ROOT||path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../trading');
 export const {buildReplayLedger,ledgerByEntry,splitReplayPosition,pacific}=require(path.join(tradingRoot,'backend/utils/replayLedger.js'));
-export const {applyReplayFeeModel,REPLAY_FEE_MODEL}=require(path.join(tradingRoot,'backend/utils/replayFees.js'));
+export {REPLAY_FEE_MODEL} from './replay-fee-expectations.js';
 
 // Read the active chart's replay facade, never a broker connection or another pane.
 export const replaySnapshotExpression = `(async () => {
