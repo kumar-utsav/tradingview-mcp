@@ -305,10 +305,12 @@ export function validatePositionPrices(plan, drawing, tickSize) {
   return { stop, target };
 }
 
-export async function renderTrade(plan, outputDir, seenImages) {
+export async function drawTradeAnnotations(plan, {disableSave=false,geometry:providedGeometry}={}) {
   const created = [];
+  const draw = args => drawShape({...args,disableSave});
+  let completed = false;
   try {
-    const geometry = await chartGeometry();
+    const geometry = providedGeometry || await chartGeometry();
     const entryBar = geometry.bars.find(bar => bar.time === plan.start.time);
     if (!entryBar || entryBar.x < 0 || entryBar.x > geometry.width) throw Error(`Trade ${plan.id}: stored entry_candle is outside the preserved view`);
     if(plan.futures){
@@ -322,7 +324,7 @@ export async function renderTrade(plan, outputDir, seenImages) {
       return info && Number(info.minmov) / Number(info.pricescale);
     })()`);
     const levels = positionToolLevels(plan, tickSize);
-    const position = await drawShape({shape:plan.position_tool,point:plan.start,
+    const position = await draw({shape:plan.position_tool,point:plan.start,
       point2:{time:plan.end.time,price:plan.start.price},
       overrides:JSON.stringify({...levels,compact:true,fontsize:10})});
     if (!position.entity_id) throw Error(`Trade ${plan.id}: position tool has no ID`);
@@ -334,12 +336,12 @@ export async function renderTrade(plan, outputDir, seenImages) {
     const markers=[];
     for (const p of placements) {
       const color=p.side==='BUY'?'#218838':'#C62828';
-      const leader=await drawShape({shape:'trend_line',point:{time:p.anchor.time,price:p.anchor.price},point2:{time:p.label.time,price:p.label.price},overrides:JSON.stringify({linecolor:color,linewidth:1})});
+      const leader=await draw({shape:'trend_line',point:{time:p.anchor.time,price:p.anchor.price},point2:{time:p.label.time,price:p.label.price},overrides:JSON.stringify({linecolor:color,linewidth:1})});
       if (!leader.entity_id) throw Error(`Trade ${plan.id}: leader line has no ID`);
       created.push(leader.entity_id);
       if(plan.futures)await evaluate(`window.TradingViewApi._activeChartWidgetWV.value().getShapeById(${JSON.stringify(leader.entity_id)}).setPoints(${JSON.stringify([{time:p.anchor.time,price:p.anchor.price},{time:p.label.time,price:p.label.price}])})`);
       await assertDrawing(leader.entity_id,'trend_line',{time:p.anchor.time,price:p.anchor.price});
-      const label=await drawShape({shape:'text',point:{time:p.label.time,price:p.label.price},text:p.text,
+      const label=await draw({shape:'text',point:{time:p.label.time,price:p.label.price},text:p.text,
         overrides:JSON.stringify({color:'#ffffff',backgroundColor:color,fillBackground:true,backgroundTransparency:0,drawBorder:false,wordWrap:false,fontsize:FILL_FONT_SIZE,bold:false})});
       if (!label.entity_id) throw Error(`Trade ${plan.id}: text label has no ID`);
       created.push(label.entity_id);
@@ -350,20 +352,31 @@ export async function renderTrade(plan, outputDir, seenImages) {
         side:p.side,quantity:p.quantity,price:p.price,filled_time:p.filled_time,text:p.text,
         anchor_rule:plan.futures?'actual_fill_price':'outside_wick',anchor_time:p.anchor.time,anchor_price:p.anchor.price,candle_time:p.time,label_time:p.label.time,label_price:p.label.price});
     }
-    const shot=await captureJournalTradeImage({tradeId:plan.id,positionId:position.entity_id,annotationIds:created,seenImages});
-    const destination=path.join(outputDir,`trade-${plan.id}.png`);
-    await fs.writeFile(destination,shot.image,{flag:'wx'});
     const view=(await getVisibleRange()).visible_range;
-    return {id:plan.id,chart_path:destination,position_entity_id:position.entity_id,position_start_candle_time:plan.start.time,
+    const receipt = {id:plan.id,annotation_ids:created,position_entity_id:position.entity_id,position_start_candle_time:plan.start.time,
       position_end_candle_time:plan.end.time,position_mfe_candle_time:plan.mfe.time,
       position_policy:plan.position_policy,exit_band:plan.exit_band,final_exit_price:plan.final_exit_price,
       position_entry_price:plan.start.price,position_target_price:plan.end.price,
       position_stop_price:plan.stop_price,stop_distance:plan.stop_distance,position_rr:positionRRRead,position_tick_size:tickSize,
       position_stop_ticks:levels.stopLevel,position_profit_ticks:levels.profitLevel,
       resolution:plan.resolution,visible_range:view,transaction_markers:markers,
-      screenshot_checks:shot.screenshot_checks,layout_automated:true,visual_review_required:true};
+      layout_automated:true,visual_review_required:true};
+    completed = true;
+    return receipt;
   } finally {
-    await removeJournalAnnotations(created);
+    if (!completed) await removeJournalAnnotations(created);
+  }
+}
+
+export async function renderTrade(plan, outputDir, seenImages) {
+  const {annotation_ids, ...receipt} = await drawTradeAnnotations(plan);
+  try {
+    const shot=await captureJournalTradeImage({tradeId:plan.id,positionId:receipt.position_entity_id,annotationIds:annotation_ids,seenImages});
+    const destination=path.join(outputDir,`trade-${plan.id}.png`);
+    await fs.writeFile(destination,shot.image,{flag:'wx'});
+    return {...receipt,chart_path:destination,screenshot_checks:shot.screenshot_checks};
+  } finally {
+    await removeJournalAnnotations(annotation_ids);
   }
 }
 

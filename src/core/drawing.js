@@ -219,7 +219,7 @@ async function registerTooltip({ evaluate, apiPath, entityId, tooltip, low, high
   return true;
 }
 
-export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, tooltip, tooltip_tolerance, reference_levels, dynamic_session_levels, _deps }) {
+export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, tooltip, tooltip_tolerance, reference_levels, dynamic_session_levels, disableSave = false, _deps }) {
   const { evaluate, getChartApi } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
   const apiPath = await getChartApi();
@@ -237,14 +237,14 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
     await evaluate(`
       ${apiPath}.createMultipointShape(
         [{ time: ${p1time}, price: ${p1price} }, { time: ${p2time}, price: ${p2price} }],
-        { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
+        { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr}, disableSave: ${disableSave === true} }
       )
     `);
   } else {
     await evaluate(`
       ${apiPath}.createShape(
         { time: ${p1time}, price: ${p1price} },
-        { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr} }
+        { shape: ${safeString(shape)}, overrides: ${overridesStr}, text: ${textStr}, disableSave: ${disableSave === true} }
       )
     `);
   }
